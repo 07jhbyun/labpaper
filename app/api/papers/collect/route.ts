@@ -117,11 +117,12 @@ export async function POST(req: NextRequest) {
 
     // ── 7. AI 요약 + 한국어 제목 + 소속 병렬 생성 ───────────────
     step = 'generate-summaries'
-    const [bulletsResults, titleKoResults, affiliationsResults, relatedResults] = await Promise.all([
+    const [bulletsResults, titleKoResults, affiliationsResults, relatedResults, tocImageResults] = await Promise.all([
       Promise.all(selectedPapers.map(p => generateSummaryBullets(p.title, p.abstract || '', p.journal))),
       Promise.all(selectedPapers.map(p => generateTitleKo(p.title))),
       Promise.all(selectedPapers.map(p => p.doi ? fetchAffiliations(p.doi) : Promise.resolve({}))),
       Promise.all(selectedPapers.map(p => findRelatedPapers(p.title))),
+      Promise.all(selectedPapers.map(p => p.doi ? fetchTocImage(p.doi) : Promise.resolve(null))),
     ])
 
     const processedPapers = selectedPapers.map((paper, i) => {
@@ -144,6 +145,7 @@ export async function POST(req: NextRequest) {
         abstract: paper.abstract || null,
         summary_bullets: bulletsResults[i],
         related_papers: relatedResults[i],
+        image_url: tocImageResults[i] || null,
         source: 'auto',
       }
     })
@@ -194,6 +196,25 @@ export async function POST(req: NextRequest) {
     const msg = serializeError(error)
     console.error(`[collect] FAILED at step="${step}":`, error)
     return NextResponse.json({ error: `[${step}] ${msg}` }, { status: 500 })
+  }
+}
+
+async function fetchTocImage(doi: string): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 3000)
+    const res = await fetch(`https://doi.org/${doi}`, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'LabPaper/1.0' },
+    })
+    clearTimeout(timer)
+    const html = await res.text()
+    const match =
+      html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)
+    return match?.[1] || null
+  } catch {
+    return null
   }
 }
 

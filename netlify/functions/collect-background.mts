@@ -147,6 +147,25 @@ async function fetchByAuthor(authorName: string) {
 
 // ── AI ──────────────────────────────────────────────────────────────────────
 
+async function fetchTocImage(doi: string): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 3000)
+    const res = await fetch(`https://doi.org/${doi}`, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'LabPaper/1.0' },
+    })
+    clearTimeout(timer)
+    const html = await res.text()
+    const match =
+      html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)
+    return match?.[1] || null
+  } catch {
+    return null
+  }
+}
+
 async function fetchAffiliations(doi: string) {
   try {
     const res = await fetch(
@@ -384,12 +403,13 @@ export default async (req: Request) => {
 
     // ── 6. AI 요약 + 한국어 제목 + 소속 전체 병렬 생성 ─────────
     step = 'generate-summaries'
-    const [summaryResults, titleKoResults, affiliationsResults] = await Promise.all([
+    const [summaryResults, titleKoResults, affiliationsResults, tocImageResults] = await Promise.all([
       Promise.all(selectedPapers.map(p => generateBullets(anthropic, p.title, p.abstract || '', p.journal))),
       Promise.all(selectedPapers.map(p => generateTitleKo(anthropic, p.title))),
       Promise.all(selectedPapers.map(p => p.doi ? fetchAffiliations(p.doi) : Promise.resolve({}))),
+      Promise.all(selectedPapers.map(p => p.doi ? fetchTocImage(p.doi) : Promise.resolve(null))),
     ])
-    console.log(`[collect-bg] summaries+titleKo+affiliations done`)
+    console.log(`[collect-bg] summaries+titleKo+affiliations+tocImages done`)
 
     const processedPapers = selectedPapers.map((paper, i) => {
       const journalIF = JOURNAL_IF_MAP[paper.journal] || 0
@@ -410,6 +430,7 @@ export default async (req: Request) => {
         abstract: paper.abstract || null,
         summary_bullets: summaryResults[i],
         related_papers: [],
+        image_url: tocImageResults[i] || null,
         source: 'auto',
       }
     })
