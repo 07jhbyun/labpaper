@@ -3,7 +3,7 @@ import PaperCard from '@/components/PaperCard'
 import HoroscopeCard from '@/components/HoroscopeCard'
 import type { Paper, Issue } from '@/lib/supabase'
 
-export const revalidate = 3600
+export const dynamic = 'force-dynamic'
 
 async function getCurrentIssue(): Promise<{ issue: Issue | null; papers: Paper[] }> {
   const { data: issue } = await supabase
