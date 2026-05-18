@@ -147,6 +147,57 @@ async function fetchByAuthor(authorName: string) {
 
 // ── AI ──────────────────────────────────────────────────────────────────────
 
+async function fetchAbstract(doi: string): Promise<string | null> {
+  // 1. Semantic Scholar
+  try {
+    const res = await fetch(
+      `${SEMANTIC_SCHOLAR_API}/paper/DOI:${doi}?fields=abstract`,
+      { headers: { 'User-Agent': 'LabPaper/1.0' } }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      if (data.abstract) return data.abstract as string
+    }
+  } catch {}
+
+  // 2. Crossref 직접 DOI 조회
+  try {
+    const res = await fetch(
+      `https://api.crossref.org/works/${doi}`,
+      { headers: { 'User-Agent': 'LabPaper/1.0 (mailto:jbyun@kist.re.kr)' } }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const abstract = (data.message?.abstract as string | undefined)
+        ?.replace(/<[^>]*>/g, '').trim()
+      if (abstract) return abstract
+    }
+  } catch {}
+
+  // 3. OpenAlex — abstract_inverted_index 복원
+  try {
+    const res = await fetch(
+      `https://api.openalex.org/works/https://doi.org/${doi}`,
+      { headers: { 'User-Agent': 'LabPaper/1.0 (mailto:jbyun@kist.re.kr)' } }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const inv = data.abstract_inverted_index as Record<string, number[]> | null
+      if (inv && typeof inv === 'object') {
+        const pairs: [number, string][] = []
+        for (const [word, positions] of Object.entries(inv)) {
+          for (const pos of positions) pairs.push([pos, word])
+        }
+        pairs.sort(([a], [b]) => a - b)
+        const abstract = pairs.map(([, w]) => w).join(' ')
+        if (abstract) return abstract
+      }
+    }
+  } catch {}
+
+  return null
+}
+
 async function fetchTocImage(doi: string): Promise<string | null> {
   // 1. Semantic Scholar figures (인덱싱된 논문에 가장 신뢰도 높음)
   try {
@@ -373,13 +424,22 @@ export default async (req: Request) => {
 
     // ── 2. 기존 논문 + 저자 목록 병렬 조회 ──────────────────────
     step = 'fetch-meta'
-    const [{ data: authors }, { data: existingPapers }] = await Promise.all([
+    const [{ data: authors }, { data: existingPapers }, { data: noAbstractPapers }] = await Promise.all([
       supabase.from('followed_authors').select('name').eq('status', 'active'),
       supabase.from('papers').select('doi, title'),
+      supabase.from('papers').select('id, doi').is('abstract', null).not('doi', 'is', null).limit(25),
     ])
     const existingDois = new Set<string>((existingPapers || []).map(p => p.doi).filter(Boolean))
     const existingTitles = new Set<string>((existingPapers || []).map(p => normalizeTitle(p.title)))
-    console.log(`[collect-bg] authors=${authors?.length ?? 0} existingDois=${existingDois.size}`)
+    console.log(`[collect-bg] authors=${authors?.length ?? 0} existingDois=${existingDois.size} noAbstract=${noAbstractPapers?.length ?? 0}`)
+
+    // 기존 논문 abstract backfill — 새 이슈 처리와 병렬 실행
+    const backfillPromise = noAbstractPapers?.length
+      ? Promise.all(noAbstractPapers.map(async (p: any) => {
+          const abstract = await fetchAbstract(p.doi)
+          if (abstract) await supabase.from('papers').update({ abstract }).eq('id', p.id)
+        })).then(() => console.log(`[collect-bg] backfilled abstract for up to ${noAbstractPapers.length} papers`))
+      : Promise.resolve()
 
     // ── 3. 저자 + 저널 전체 병렬 수집 ───────────────────────────
     step = 'collect-papers'
@@ -403,6 +463,15 @@ export default async (req: Request) => {
       return true
     })
     console.log(`[collect-bg] unique=${uniquePapers.length}`)
+
+    // ── 4.5. 신규 논문 abstract 보완 ────────────────────────────
+    step = 'fill-abstracts'
+    const missingAbstractPapers = uniquePapers.filter((p: any) => !p.abstract && p.doi)
+    if (missingAbstractPapers.length > 0) {
+      const filled = await Promise.all(missingAbstractPapers.map((p: any) => fetchAbstract(p.doi)))
+      missingAbstractPapers.forEach((p: any, i: number) => { if (filled[i]) p.abstract = filled[i] })
+      console.log(`[collect-bg] filled=${filled.filter(Boolean).length}/${missingAbstractPapers.length} missing abstracts`)
+    }
 
     // ── 5. 키워드/리뷰 필터 + 정렬 ─────────────────────────────
     step = 'filter-papers'
@@ -473,6 +542,9 @@ export default async (req: Request) => {
     const { error: papersError } = await supabase.from('papers').insert(processedPapers)
     if (papersError) throw new Error(`papers insert 실패: ${papersError.message} (code: ${papersError.code})`)
     console.log(`[collect-bg] DB saved. Vol.${newIssueNumber}, ${processedPapers.length}편`)
+
+    // ── 8.5. backfill 완료 대기 ────────────────────────────────
+    await backfillPromise.catch((e: unknown) => console.error('[collect-bg] backfill error:', e))
 
     // ── 9. 이메일 발송 ──────────────────────────────────────────
     step = 'send-emails'

@@ -5,6 +5,7 @@ import {
   fetchPapersByJournal,
   findRelatedPapers,
   fetchAffiliations,
+  fetchAbstract,
   JOURNAL_ISSN_MAP,
   JOURNAL_IF_MAP,
   passesKeywordFilter,
@@ -53,11 +54,13 @@ export async function POST(req: NextRequest) {
     if (authorsError) throw new Error(`followed_authors 조회 실패: ${authorsError.message}`)
     console.log(`[collect] step=${step} authors=${authors?.length ?? 0}`)
 
-    // ── 3. 기존 논문 중복 체크용 ──────────────────────────────────
+    // ── 3. 기존 논문 중복 체크 + abstract 없는 논문 backfill 병렬 시작 ──
     step = 'fetch-existing-papers'
-    const { data: existingPapers } = await supabaseAdmin
-      .from('papers')
-      .select('doi, title')
+    const [{ data: existingPapers }, { data: noAbstractPapers }] = await Promise.all([
+      supabaseAdmin.from('papers').select('doi, title'),
+      supabaseAdmin.from('papers').select('id, doi')
+        .is('abstract', null).not('doi', 'is', null).limit(25),
+    ])
 
     const existingDois = new Set<string>(
       (existingPapers || []).map(p => p.doi).filter(Boolean)
@@ -65,7 +68,15 @@ export async function POST(req: NextRequest) {
     const existingTitles = new Set<string>(
       (existingPapers || []).map(p => normalizeTitle(p.title))
     )
-    console.log(`[collect] step=${step} existingDois=${existingDois.size}`)
+    console.log(`[collect] step=${step} existingDois=${existingDois.size} noAbstract=${noAbstractPapers?.length ?? 0}`)
+
+    // 기존 논문 backfill — 새 이슈 처리와 병렬로 실행
+    const backfillPromise = noAbstractPapers?.length
+      ? Promise.all(noAbstractPapers.map(async p => {
+          const abstract = await fetchAbstract(p.doi)
+          if (abstract) await supabaseAdmin.from('papers').update({ abstract }).eq('id', p.id)
+        })).then(() => console.log(`[collect] backfilled abstract for up to ${noAbstractPapers.length} papers`))
+      : Promise.resolve()
 
     // ── 4. 논문 수집 ──────────────────────────────────────────────
     step = 'collect-papers'
@@ -97,6 +108,15 @@ export async function POST(req: NextRequest) {
       return true
     })
     console.log(`[collect] step=${step} unique=${uniquePapers.length}`)
+
+    // ── 5.5. 신규 논문 abstract 보완 ─────────────────────────────
+    step = 'fill-abstracts'
+    const missingAbstractPapers = uniquePapers.filter(p => !p.abstract && p.doi)
+    if (missingAbstractPapers.length > 0) {
+      const filled = await Promise.all(missingAbstractPapers.map(p => fetchAbstract(p.doi)))
+      missingAbstractPapers.forEach((p, i) => { if (filled[i]) p.abstract = filled[i] })
+      console.log(`[collect] step=${step} filled=${filled.filter(Boolean).length}/${missingAbstractPapers.length}`)
+    }
 
     // ── 6. 키워드/리뷰 필터 + 정렬 ───────────────────────────────
     step = 'filter-papers'
@@ -175,7 +195,9 @@ export async function POST(req: NextRequest) {
     if (papersError) throw new Error(`papers insert 실패: ${papersError.message} (code: ${papersError.code})`)
     console.log(`[collect] step=${step} done`)
 
-    // ── 10. 이메일 알림 (fire and forget) ────────────────────────
+    // ── 10. backfill 완료 대기 + 이메일 알림 ─────────────────────
+    await backfillPromise.catch(e => console.error('[collect] backfill error:', e))
+
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
     fetch(`${siteUrl}/api/notify`, {
       method: 'POST',

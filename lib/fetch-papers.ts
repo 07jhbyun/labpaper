@@ -176,6 +176,58 @@ export interface RawPaper {
   abstract: string
 }
 
+// Abstract 3단계 폴백 조회
+export async function fetchAbstract(doi: string): Promise<string | null> {
+  // 1. Semantic Scholar — 직접 DOI 조회
+  try {
+    const res = await fetch(
+      `${SEMANTIC_SCHOLAR_API}/paper/DOI:${doi}?fields=abstract`,
+      { headers: { 'User-Agent': 'LabPaper/1.0' } }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      if (data.abstract) return data.abstract as string
+    }
+  } catch {}
+
+  // 2. Crossref — 개별 DOI 엔드포인트 (배치 쿼리보다 abstract 포함률 높음)
+  try {
+    const res = await fetch(
+      `https://api.crossref.org/works/${doi}`,
+      { headers: { 'User-Agent': 'LabPaper/1.0 (mailto:jbyun@kist.re.kr)' } }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const abstract = (data.message?.abstract as string | undefined)
+        ?.replace(/<[^>]*>/g, '').trim()
+      if (abstract) return abstract
+    }
+  } catch {}
+
+  // 3. OpenAlex — abstract_inverted_index 복원 (Unpaywall은 abstract 필드 없음)
+  try {
+    const res = await fetch(
+      `https://api.openalex.org/works/https://doi.org/${doi}`,
+      { headers: { 'User-Agent': 'LabPaper/1.0 (mailto:jbyun@kist.re.kr)' } }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      const inv = data.abstract_inverted_index as Record<string, number[]> | null
+      if (inv && typeof inv === 'object') {
+        const pairs: [number, string][] = []
+        for (const [word, positions] of Object.entries(inv)) {
+          for (const pos of positions) pairs.push([pos, word])
+        }
+        pairs.sort(([a], [b]) => a - b)
+        const abstract = pairs.map(([, w]) => w).join(' ')
+        if (abstract) return abstract
+      }
+    }
+  } catch {}
+
+  return null
+}
+
 // 1저자·교신저자 소속 조회 (Semantic Scholar, DOI 필요)
 export async function fetchAffiliations(doi: string): Promise<{
   first?: { name: string; affiliation: string }
