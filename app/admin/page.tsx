@@ -118,6 +118,12 @@ export default function AdminPage() {
         method: 'POST',
         headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}` },
       })
+      // 202: Netlify 백그라운드 함수 (1-2분 소요)
+      if (res.status === 202) {
+        setCollectResult('🔄 수집을 시작했습니다. 완료까지 1~2분 소요됩니다. 잠시 후 새로고침해주세요.')
+        setCollecting(false)
+        return
+      }
       const data = await res.json()
       setCollectResult(data.success
         ? `✅ Vol.${data.issue_number} 생성 완료 — 논문 ${data.papers_collected}편`
