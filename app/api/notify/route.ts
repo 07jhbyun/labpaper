@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { sendNewsletterEmail } from '@/lib/email'
+import { sendNewsletterEmail, generateEmailSubject } from '@/lib/email'
 
 export async function POST(req: NextRequest) {
   const auth = req.headers.get('authorization')
@@ -43,19 +43,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, sent: 0, message: '구독자 없음' })
     }
 
+    // 제목 한 번만 생성 (구독자 수와 무관)
+    const subject = await generateEmailSubject(
+      issue.issue_number,
+      papers.map((p: any) => p.title)
+    )
+
     // 전체 발송
     let sent = 0
     const errors: string[] = []
 
     for (const sub of subscribers) {
       try {
-        await sendNewsletterEmail({
-          to: sub.email,
-          name: sub.name || undefined,
-          issueNumber: issue.issue_number,
-          papers,
-          horoscope: issue.horoscope,
-        })
+        await sendNewsletterEmail(
+          {
+            to: sub.email,
+            name: sub.name || undefined,
+            issueNumber: issue.issue_number,
+            papers,
+            horoscope: issue.horoscope,
+          },
+          subject
+        )
         sent++
       } catch (e) {
         console.error(`Failed to send to ${sub.email}:`, e)

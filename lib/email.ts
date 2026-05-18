@@ -1,4 +1,5 @@
 import { Resend } from 'resend'
+import { generateEmailSubject } from './ai'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
@@ -132,11 +133,17 @@ function buildHtml({ name, issueNumber, papers, horoscope }: Omit<EmailParams, '
   `.trim()
 }
 
-export async function sendNewsletterEmail({ to, name, issueNumber, papers, horoscope }: EmailParams) {
+// 제목만 별도 생성 (notify route에서 한 번만 호출 후 재사용)
+export { generateEmailSubject }
+
+export async function sendNewsletterEmail(
+  { to, name, issueNumber, papers, horoscope }: EmailParams,
+  subject: string
+) {
   return resend.emails.send({
     from: FROM,
     to,
-    subject: `📄 LabPaper Vol.${issueNumber} — 이번 주 논문 ${papers.length}편 나왔습니다`,
+    subject,
     html: buildHtml({ name, issueNumber, papers, horoscope }),
   })
 }
