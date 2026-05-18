@@ -148,6 +148,23 @@ async function fetchByAuthor(authorName: string) {
 // ── AI ──────────────────────────────────────────────────────────────────────
 
 async function fetchTocImage(doi: string): Promise<string | null> {
+  // 1. Semantic Scholar figures (인덱싱된 논문에 가장 신뢰도 높음)
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 3000)
+    const res = await fetch(
+      `https://api.semanticscholar.org/graph/v1/paper/DOI:${doi}?fields=figures`,
+      { signal: controller.signal, headers: { 'User-Agent': 'LabPaper/1.0' } }
+    )
+    clearTimeout(timer)
+    if (res.ok) {
+      const data = await res.json()
+      const url = data.figures?.[0]?.imageUrls?.[0]
+      if (url) return url
+    }
+  } catch {}
+
+  // 2. Fallback: DOI 페이지 og:image (일부 저널에서 동작)
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 3000)
