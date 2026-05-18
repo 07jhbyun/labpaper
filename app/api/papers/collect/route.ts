@@ -142,6 +142,18 @@ export async function POST(req: NextRequest) {
 
     if (papersError) throw papersError
 
+    // 이메일 알림 발송 (비동기, 실패해도 수집 결과에 영향 없음)
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+    const cronSecret = process.env.CRON_SECRET || process.env.NEXT_PUBLIC_CRON_SECRET
+    fetch(`${siteUrl}/api/notify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${cronSecret}`,
+      },
+      body: JSON.stringify({ issue_number: newIssueNumber }),
+    }).catch(e => console.error('Notify failed:', e))
+
     return NextResponse.json({
       success: true,
       issue_number: newIssueNumber,

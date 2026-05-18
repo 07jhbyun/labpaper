@@ -30,11 +30,16 @@ export default function AdminPage() {
   const [manualPaper, setManualPaper] = useState({
     title: '', authors: '', journal: '', year: new Date().getFullYear(), doi: '',
   })
+  const [subscribers, setSubscribers] = useState<any[]>([])
+  const [newSub, setNewSub] = useState({ email: '', name: '' })
+  const [notifyResult, setNotifyResult] = useState('')
+  const [sendingNotify, setSendingNotify] = useState(false)
 
   function checkPassword() {
     if (password === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
       setAuthed(true)
       loadSuggestions()
+      loadSubscribers()
     } else {
       alert('비밀번호가 틀렸습니다')
     }
@@ -53,6 +58,51 @@ export default function AdminPage() {
     await supabaseAdmin.from('followed_authors').insert({ name, status: 'active', suggested_by: 'student' })
     await supabaseAdmin.from('author_suggestions').update({ status: 'approved' }).eq('id', id)
     loadSuggestions()
+  }
+
+  async function loadSubscribers() {
+    const { data } = await supabaseAdmin
+      .from('subscribers')
+      .select('*')
+      .order('created_at', { ascending: false })
+    setSubscribers(data || [])
+  }
+
+  async function addSubscriber() {
+    if (!newSub.email.trim()) return
+    await supabaseAdmin.from('subscribers').insert({
+      email: newSub.email.trim(),
+      name: newSub.name.trim(),
+    })
+    setNewSub({ email: '', name: '' })
+    loadSubscribers()
+  }
+
+  async function removeSubscriber(id: string) {
+    await supabaseAdmin.from('subscribers').delete().eq('id', id)
+    loadSubscribers()
+  }
+
+  async function sendTestEmail() {
+    setSendingNotify(true)
+    setNotifyResult('')
+    try {
+      const res = await fetch('/api/notify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}`,
+        },
+        body: JSON.stringify({}),
+      })
+      const data = await res.json()
+      setNotifyResult(data.success
+        ? `✅ ${data.sent}명에게 발송 완료`
+        : `❌ 오류: ${data.error}`)
+    } catch {
+      setNotifyResult('❌ 네트워크 오류')
+    }
+    setSendingNotify(false)
   }
 
   async function rejectSuggestion(id: string) {
@@ -167,6 +217,85 @@ export default function AdminPage() {
             추가
           </button>
         </div>
+      </section>
+
+      {/* 구독자 관리 */}
+      <section style={sectionStyle}>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold" style={{ color: '#3a3a3c' }}>
+            이메일 구독자 ({subscribers.filter(s => s.active).length}명 활성)
+          </h2>
+          <div className="flex items-center gap-2">
+            {notifyResult && (
+              <span className="text-xs" style={{ color: '#3a3a3c' }}>{notifyResult}</span>
+            )}
+            <button
+              onClick={sendTestEmail}
+              disabled={sendingNotify}
+              className="text-xs font-medium px-3 py-1.5 transition-opacity disabled:opacity-40"
+              style={{ backgroundColor: '#f0fdf4', color: '#166534', borderRadius: 8 }}
+            >
+              {sendingNotify ? '발송 중...' : '테스트 메일 발송'}
+            </button>
+          </div>
+        </div>
+
+        {/* 구독자 추가 */}
+        <div className="flex gap-2 mb-4">
+          <input
+            type="email"
+            placeholder="이메일"
+            value={newSub.email}
+            onChange={e => setNewSub(prev => ({ ...prev, email: e.target.value }))}
+            style={{ ...inputStyle, width: 'auto', flex: 1 }}
+            onKeyDown={e => e.key === 'Enter' && addSubscriber()}
+          />
+          <input
+            type="text"
+            placeholder="이름 (선택)"
+            value={newSub.name}
+            onChange={e => setNewSub(prev => ({ ...prev, name: e.target.value }))}
+            style={{ ...inputStyle, width: 'auto', flex: 1 }}
+            onKeyDown={e => e.key === 'Enter' && addSubscriber()}
+          />
+          <button
+            onClick={addSubscriber}
+            disabled={!newSub.email.trim()}
+            className="text-sm font-medium px-4 py-2 transition-opacity disabled:opacity-40 flex-shrink-0"
+            style={{ backgroundColor: '#0071e3', color: '#ffffff', borderRadius: 8 }}
+          >
+            추가
+          </button>
+        </div>
+
+        {/* 구독자 목록 */}
+        {subscribers.length === 0 ? (
+          <p className="text-sm" style={{ color: '#86868b' }}>구독자가 없습니다.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {subscribers.map(sub => (
+              <div
+                key={sub.id}
+                className="flex items-center justify-between px-3 py-2"
+                style={{ backgroundColor: '#f5f5f7', borderRadius: 8 }}
+              >
+                <div>
+                  <span className="text-sm font-medium" style={{ color: '#1d1d1f' }}>
+                    {sub.name || '—'}
+                  </span>
+                  <span className="text-xs ml-2" style={{ color: '#86868b' }}>{sub.email}</span>
+                </div>
+                <button
+                  onClick={() => removeSubscriber(sub.id)}
+                  className="text-xs transition-opacity hover:opacity-60"
+                  style={{ color: '#be123c' }}
+                >
+                  삭제
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* 저자 제안 승인 */}
