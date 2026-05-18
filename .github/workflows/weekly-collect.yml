@@ -14,7 +14,7 @@ jobs:
       - name: Trigger paper collection (Netlify Background Function)
         run: |
           response=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
-            -X POST "https://labpaper.netlify.app/.netlify/functions/collect-background" \
+            -X POST "https://labpaper.netlify.app/api/papers/collect" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
 
@@ -22,7 +22,7 @@ jobs:
           echo "Response body:"
           cat /tmp/response.txt
 
-          # Background function은 항상 202를 즉시 반환 (비동기 실행)
+          # Background function은 항상 202를 즉시 반환 (비동기 실행, 최대 15분)
           if [ "$response" != "202" ]; then
             echo "Unexpected status: $response"
             exit 1
