@@ -144,7 +144,7 @@ export async function sendNewsletterEmail(
   return resend.emails.send({
     from: FROM,
     to,
-    reply_to: REPLY_TO,
+    replyTo: REPLY_TO,
     subject,
     html: buildHtml({ name, issueNumber, papers, horoscope }),
   })

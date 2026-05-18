@@ -1,0 +1,30 @@
+name: Weekly Paper Collection
+
+on:
+  schedule:
+    - cron: '0 0 * * 1'  # 매주 월요일 00:00 UTC = 09:00 KST
+  workflow_dispatch:       # 수동 트리거 허용
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Trigger paper collection
+        run: |
+          response=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+            -X POST "https://labpaper.netlify.app/api/papers/collect" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}")
+
+          echo "HTTP status: $response"
+          echo "Response body:"
+          cat /tmp/response.txt
+
+          if [ "$response" != "200" ] && [ "$response" != "202" ]; then
+            echo "Collection failed with status $response"
+            exit 1
+          fi
+
+          echo "Collection triggered successfully"
