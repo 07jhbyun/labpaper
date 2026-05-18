@@ -560,6 +560,7 @@ export default async (req: Request) => {
             resend.emails.send({
               from: process.env.RESEND_FROM_EMAIL || 'LabPaper <onboarding@resend.dev>',
               to: sub.email,
+              reply_to: process.env.RESEND_REPLY_TO || undefined,
               subject: emailSubject,
               html: buildEmailHtml(newIssueNumber, processedPapers, horoscope, sub.name || undefined),
             }).catch(e => console.error(`[collect-bg] email failed to ${sub.email}:`, e))

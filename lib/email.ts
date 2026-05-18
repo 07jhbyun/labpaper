@@ -5,6 +5,7 @@ const resend = new Resend(process.env.RESEND_API_KEY)
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
 const FROM = process.env.RESEND_FROM_EMAIL || 'LabPaper <onboarding@resend.dev>'
+const REPLY_TO = process.env.RESEND_REPLY_TO || undefined
 
 // 티어별 배지 스타일 (이메일 인라인용)
 const TIER_STYLES: Record<string, { bg: string; text: string; icon: string }> = {
@@ -143,6 +144,7 @@ export async function sendNewsletterEmail(
   return resend.emails.send({
     from: FROM,
     to,
+    reply_to: REPLY_TO,
     subject,
     html: buildHtml({ name, issueNumber, papers, horoscope }),
   })
