@@ -8,7 +8,7 @@ create table papers (
   title text not null,
   authors text not null,
   journal text not null,
-  journal_tier text not null check (journal_tier in ('top', 'field', 'applied')),
+  journal_tier text not null check (journal_tier in ('crown', 'top', 'high', 'mid', 'applied')),
   year integer not null,
   doi text,
   abstract text,
