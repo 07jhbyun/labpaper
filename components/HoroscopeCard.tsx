@@ -30,7 +30,7 @@ export default function HoroscopeCard({ horoscope }: { horoscope: Horoscope }) {
         <div className="flex items-center gap-2">
           <span className="text-base">🧪</span>
           <span className="text-sm font-semibold" style={{ color: '#92400e' }}>
-            이번 주 논문 요약 (밈버전)
+            이번 주 논문 요약
           </span>
         </div>
         <span className="text-xs" style={{ color: '#d97706' }}>

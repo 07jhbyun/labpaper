@@ -4,12 +4,13 @@ import {
   fetchPapersByAuthor,
   fetchPapersByJournal,
   findRelatedPapers,
+  fetchAffiliations,
   JOURNAL_ISSN_MAP,
   JOURNAL_IF_MAP,
   passesKeywordFilter,
   isReviewPaper,
 } from '@/lib/fetch-papers'
-import { generateSummaryBullets, generateWeeklyHoroscope } from '@/lib/ai'
+import { generateSummaryBullets, generateTitleKo, generateWeeklyHoroscope } from '@/lib/ai'
 
 function serializeError(error: unknown): string {
   if (error instanceof Error) return error.message
@@ -61,8 +62,8 @@ export async function POST(req: NextRequest) {
     const existingDois = new Set<string>(
       (existingPapers || []).map(p => p.doi).filter(Boolean)
     )
-    const existingTitlePrefixes = new Set<string>(
-      (existingPapers || []).filter(p => !p.doi).map(p => normalizeTitle(p.title))
+    const existingTitles = new Set<string>(
+      (existingPapers || []).map(p => normalizeTitle(p.title))
     )
     console.log(`[collect] step=${step} existingDois=${existingDois.size}`)
 
@@ -83,21 +84,19 @@ export async function POST(req: NextRequest) {
     }
     console.log(`[collect] step=${step} raw=${allRawPapers.length}`)
 
-    // ── 5. 중복 제거 ──────────────────────────────────────────────
+    // ── 5. 중복 제거 (DOI + 정규화 제목 이중 체크) ───────────────
     step = 'deduplicate'
-    const seen = new Set<string>()
-    const deduped = allRawPapers.filter(p => {
-      if (!p.doi) return true
-      if (seen.has(p.doi)) return false
-      seen.add(p.doi)
+    const seenDois = new Set<string>()
+    const seenTitles = new Set<string>()
+    const uniquePapers = allRawPapers.filter(p => {
+      const normTitle = normalizeTitle(p.title || '')
+      if (seenTitles.has(normTitle) || existingTitles.has(normTitle)) return false
+      if (p.doi && (seenDois.has(p.doi) || existingDois.has(p.doi))) return false
+      seenTitles.add(normTitle)
+      if (p.doi) seenDois.add(p.doi)
       return true
     })
-    const uniquePapers = deduped.filter(p => {
-      if (p.doi && existingDois.has(p.doi)) return false
-      if (!p.doi && existingTitlePrefixes.has(normalizeTitle(p.title || ''))) return false
-      return true
-    })
-    console.log(`[collect] step=${step} deduped=${deduped.length} unique=${uniquePapers.length}`)
+    console.log(`[collect] step=${step} unique=${uniquePapers.length}`)
 
     // ── 6. 키워드/리뷰 필터 + 정렬 ───────────────────────────────
     step = 'filter-papers'
@@ -116,37 +115,38 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // ── 7. AI 요약 생성 ───────────────────────────────────────────
+    // ── 7. AI 요약 + 한국어 제목 + 소속 병렬 생성 ───────────────
     step = 'generate-summaries'
-    const processedPapers = []
-    for (const paper of selectedPapers) {
-      console.log(`[collect] summarizing: ${paper.title.slice(0, 60)}`)
-      const [bullets, related] = await Promise.all([
-        generateSummaryBullets(paper.title, paper.abstract || '', paper.journal),
-        findRelatedPapers(paper.title),
-      ])
+    const [bulletsResults, titleKoResults, affiliationsResults, relatedResults] = await Promise.all([
+      Promise.all(selectedPapers.map(p => generateSummaryBullets(p.title, p.abstract || '', p.journal))),
+      Promise.all(selectedPapers.map(p => generateTitleKo(p.title))),
+      Promise.all(selectedPapers.map(p => p.doi ? fetchAffiliations(p.doi) : Promise.resolve({}))),
+      Promise.all(selectedPapers.map(p => findRelatedPapers(p.title))),
+    ])
 
+    const processedPapers = selectedPapers.map((paper, i) => {
       const journalIF = JOURNAL_IF_MAP[paper.journal] || 0
       const journal_tier =
         journalIF >= 40 ? 'crown' :
         journalIF >= 25 ? 'top' :
         journalIF >= 15 ? 'high' :
         journalIF >= 8  ? 'mid' : 'applied'
-
-      processedPapers.push({
+      return {
         issue_number: newIssueNumber,
         title: paper.title,
+        title_ko: titleKoResults[i] || null,
         authors: paper.authors,
+        affiliations: Object.keys(affiliationsResults[i]).length ? affiliationsResults[i] : null,
         journal: paper.journal,
         journal_tier,
         year: paper.year,
         doi: paper.doi || null,
         abstract: paper.abstract || null,
-        summary_bullets: bullets,
-        related_papers: related,
+        summary_bullets: bulletsResults[i],
+        related_papers: relatedResults[i],
         source: 'auto',
-      })
-    }
+      }
+    })
     console.log(`[collect] step=${step} processedPapers=${processedPapers.length}`)
 
     // ── 8. 밈 요약 ────────────────────────────────────────────────
@@ -202,5 +202,9 @@ function sleep(ms: number) {
 }
 
 function normalizeTitle(title: string): string {
-  return title.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 50)
+  return title.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60)
 }

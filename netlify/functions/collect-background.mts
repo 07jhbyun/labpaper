@@ -76,7 +76,11 @@ function isReviewPaper(title: string, abstract: string) {
 }
 
 function normalizeTitle(title: string) {
-  return title.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 50)
+  return title.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60)
 }
 
 function serializeError(e: unknown): string {
@@ -142,6 +146,46 @@ async function fetchByAuthor(authorName: string) {
 }
 
 // ── AI ──────────────────────────────────────────────────────────────────────
+
+async function fetchAffiliations(doi: string) {
+  try {
+    const res = await fetch(
+      `${SEMANTIC_SCHOLAR_API}/paper/DOI:${doi}?fields=authors.affiliations,authors.name`,
+      { headers: { 'User-Agent': 'LabPaper/1.0' } }
+    )
+    const data = await res.json()
+    const authors: { name: string; affiliations: string[] }[] = data.authors || []
+    if (!authors.length) return {}
+    const pick = (a: { name: string; affiliations: string[] }) => ({
+      name: a.name,
+      affiliation: a.affiliations?.[0] || '',
+    })
+    const first = pick(authors[0])
+    const last = pick(authors[authors.length - 1])
+    const result: Record<string, { name: string; affiliation: string }> = {}
+    if (first.affiliation) result.first = first
+    if (authors.length > 1 && last.affiliation) result.corresponding = last
+    return result
+  } catch {
+    return {}
+  }
+}
+
+async function generateTitleKo(client: Anthropic, title: string): Promise<string> {
+  try {
+    const msg = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 100,
+      messages: [{
+        role: 'user',
+        content: `다음 논문 제목을 한국어로 자연스럽게 번역해줘. 번역문만 답해줘.\n${title}`,
+      }]
+    })
+    return msg.content[0].type === 'text' ? msg.content[0].text.trim() : ''
+  } catch {
+    return ''
+  }
+}
 
 async function generateBullets(client: Anthropic, title: string, abstract: string, journal: string) {
   try {
@@ -298,9 +342,7 @@ export default async (req: Request) => {
       supabase.from('papers').select('doi, title'),
     ])
     const existingDois = new Set<string>((existingPapers || []).map(p => p.doi).filter(Boolean))
-    const existingTitlePrefixes = new Set<string>(
-      (existingPapers || []).filter(p => !p.doi).map(p => normalizeTitle(p.title))
-    )
+    const existingTitles = new Set<string>((existingPapers || []).map(p => normalizeTitle(p.title)))
     console.log(`[collect-bg] authors=${authors?.length ?? 0} existingDois=${existingDois.size}`)
 
     // ── 3. 저자 + 저널 전체 병렬 수집 ───────────────────────────
@@ -312,17 +354,16 @@ export default async (req: Request) => {
     const allRawPapers = [...authorResults.flat(), ...journalResults.flat()]
     console.log(`[collect-bg] raw=${allRawPapers.length}`)
 
-    // ── 4. 중복 제거 ────────────────────────────────────────────
+    // ── 4. 중복 제거 (DOI + 정규화 제목 이중 체크) ─────────────
     step = 'deduplicate'
-    const seen = new Set<string>()
+    const seenDois = new Set<string>()
+    const seenTitles = new Set<string>()
     const uniquePapers = allRawPapers.filter(p => {
-      if (p.doi) {
-        if (seen.has(p.doi) || existingDois.has(p.doi)) return false
-        seen.add(p.doi)
-      } else {
-        const key = normalizeTitle(p.title || '')
-        if (existingTitlePrefixes.has(key)) return false
-      }
+      const normTitle = normalizeTitle(p.title || '')
+      if (seenTitles.has(normTitle) || existingTitles.has(normTitle)) return false
+      if (p.doi && (seenDois.has(p.doi) || existingDois.has(p.doi))) return false
+      seenTitles.add(normTitle)
+      if (p.doi) seenDois.add(p.doi)
       return true
     })
     console.log(`[collect-bg] unique=${uniquePapers.length}`)
@@ -341,22 +382,27 @@ export default async (req: Request) => {
       return
     }
 
-    // ── 6. AI 요약 전체 병렬 생성 ───────────────────────────────
+    // ── 6. AI 요약 + 한국어 제목 + 소속 전체 병렬 생성 ─────────
     step = 'generate-summaries'
-    const summaryResults = await Promise.all(
-      selectedPapers.map(p => generateBullets(anthropic, p.title, p.abstract || '', p.journal))
-    )
-    console.log(`[collect-bg] summaries done`)
+    const [summaryResults, titleKoResults, affiliationsResults] = await Promise.all([
+      Promise.all(selectedPapers.map(p => generateBullets(anthropic, p.title, p.abstract || '', p.journal))),
+      Promise.all(selectedPapers.map(p => generateTitleKo(anthropic, p.title))),
+      Promise.all(selectedPapers.map(p => p.doi ? fetchAffiliations(p.doi) : Promise.resolve({}))),
+    ])
+    console.log(`[collect-bg] summaries+titleKo+affiliations done`)
 
     const processedPapers = selectedPapers.map((paper, i) => {
       const journalIF = JOURNAL_IF_MAP[paper.journal] || 0
       const journal_tier =
         journalIF >= 40 ? 'crown' : journalIF >= 25 ? 'top' :
         journalIF >= 15 ? 'high' : journalIF >= 8  ? 'mid' : 'applied'
+      const aff = affiliationsResults[i]
       return {
         issue_number: newIssueNumber,
         title: paper.title,
+        title_ko: titleKoResults[i] || null,
         authors: paper.authors,
+        affiliations: Object.keys(aff).length ? aff : null,
         journal: paper.journal,
         journal_tier,
         year: paper.year,

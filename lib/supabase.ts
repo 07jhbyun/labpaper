@@ -13,11 +13,18 @@ export const supabaseAdmin = createClient(
 export type JournalTier = 'crown' | 'top' | 'high' | 'mid' | 'applied'
 export type ReactionType = 'why_here' | 'life_paper' | 'must_cite' | 'gpt_wrote' | 'star'
 
+export interface Affiliation {
+  name: string
+  affiliation: string
+}
+
 export interface Paper {
   id: string
   issue_number: number
   title: string
+  title_ko?: string
   authors: string
+  affiliations?: { first?: Affiliation; corresponding?: Affiliation }
   journal: string
   journal_tier: JournalTier
   year: number

@@ -176,6 +176,36 @@ export interface RawPaper {
   abstract: string
 }
 
+// 1저자·교신저자 소속 조회 (Semantic Scholar, DOI 필요)
+export async function fetchAffiliations(doi: string): Promise<{
+  first?: { name: string; affiliation: string }
+  corresponding?: { name: string; affiliation: string }
+}> {
+  try {
+    const res = await fetch(
+      `${SEMANTIC_SCHOLAR_API}/paper/DOI:${doi}?fields=authors.affiliations,authors.name`,
+      { headers: { 'User-Agent': 'LabPaper/1.0' } }
+    )
+    const data = await res.json()
+    const authors: { name: string; affiliations: string[] }[] = data.authors || []
+    if (!authors.length) return {}
+
+    const pick = (a: { name: string; affiliations: string[] }) => ({
+      name: a.name,
+      affiliation: a.affiliations?.[0] || '',
+    })
+
+    const first = pick(authors[0])
+    const last = pick(authors[authors.length - 1])
+    const result: { first?: { name: string; affiliation: string }; corresponding?: { name: string; affiliation: string } } = {}
+    if (first.affiliation) result.first = first
+    if (authors.length > 1 && last.affiliation) result.corresponding = last
+    return result
+  } catch {
+    return {}
+  }
+}
+
 // 관련 핵심 논문 검색 (Semantic Scholar)
 export async function findRelatedPapers(title: string): Promise<any[]> {
   try {

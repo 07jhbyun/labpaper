@@ -152,7 +152,7 @@ export default function PaperCard({ paper }: { paper: Paper }) {
       </div>
 
       {/* 제목 */}
-      <h2 className="text-[15px] font-semibold leading-snug mb-1.5" style={{ color: '#1d1d1f' }}>
+      <h2 className="text-[15px] font-semibold leading-snug mb-0.5" style={{ color: '#1d1d1f' }}>
         {doiUrl ? (
           <a href={doiUrl} target="_blank" rel="noopener noreferrer"
             className="hover:opacity-60 transition-opacity">
@@ -161,10 +161,32 @@ export default function PaperCard({ paper }: { paper: Paper }) {
         ) : paper.title}
       </h2>
 
+      {/* 한국어 번역 제목 */}
+      {paper.title_ko && (
+        <p className="text-[13px] mb-1" style={{ color: '#6e6e73' }}>{paper.title_ko}</p>
+      )}
+
       {/* 저자 */}
-      <p className="text-xs mb-4" style={{ color: '#86868b' }}>
+      <p className="text-xs mt-1" style={{ color: '#86868b' }}>
         {paper.authors} · {paper.year}
       </p>
+
+      {/* 소속 (1저자 / 교신저자) */}
+      {(paper.affiliations?.first?.affiliation || paper.affiliations?.corresponding?.affiliation) && (
+        <p className="text-[11px] mt-0.5 mb-4 leading-relaxed" style={{ color: '#aeaeb2' }}>
+          {paper.affiliations.first?.affiliation && (
+            <span>{paper.affiliations.first.name}: {paper.affiliations.first.affiliation}</span>
+          )}
+          {paper.affiliations.corresponding &&
+            paper.affiliations.corresponding.name !== paper.affiliations.first?.name &&
+            paper.affiliations.corresponding.affiliation && (
+              <span> · {paper.affiliations.corresponding.name}: {paper.affiliations.corresponding.affiliation}</span>
+          )}
+        </p>
+      )}
+      {!paper.affiliations?.first?.affiliation && !paper.affiliations?.corresponding?.affiliation && (
+        <div className="mb-4" />
+      )}
 
       {/* TOC 이미지 + 핵심 결과 */}
       <div className="flex gap-4 mb-4">
@@ -197,14 +219,35 @@ export default function PaperCard({ paper }: { paper: Paper }) {
         </div>
 
         {/* 핵심 결과 bullets */}
-        <ul className="flex-1 space-y-1.5">
-          {paper.summary_bullets.filter(Boolean).map((bullet, i) => (
-            <li key={i} className="flex gap-2 text-[13px] leading-snug">
-              <span className="flex-shrink-0" style={{ color: '#c7c7cc' }}>•</span>
-              <span style={{ color: '#3a3a3c' }}>{bullet}</span>
-            </li>
-          ))}
-        </ul>
+        {(() => {
+          const goodBullets = paper.summary_bullets.filter(
+            b => b && !b.includes('확인하세요') && !b.includes('오류')
+          )
+          if (goodBullets.length >= 2) {
+            return (
+              <ul className="flex-1 space-y-1.5">
+                {goodBullets.map((bullet, i) => (
+                  <li key={i} className="flex gap-2 text-[13px] leading-snug">
+                    <span className="flex-shrink-0" style={{ color: '#c7c7cc' }}>•</span>
+                    <span style={{ color: '#3a3a3c' }}>{bullet}</span>
+                  </li>
+                ))}
+              </ul>
+            )
+          }
+          if (paper.abstract) {
+            return (
+              <p className="flex-1 text-[13px] leading-relaxed" style={{ color: '#3a3a3c' }}>
+                {paper.abstract.slice(0, 300)}{paper.abstract.length > 300 ? '…' : ''}
+              </p>
+            )
+          }
+          return (
+            <p className="flex-1 text-[13px]" style={{ color: '#aeaeb2' }}>
+              Abstract를 불러올 수 없습니다
+            </p>
+          )
+        })()}
       </div>
 
       {/* 관련 논문 */}

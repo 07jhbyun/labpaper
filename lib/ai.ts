@@ -37,6 +37,23 @@ JSON 배열 형식으로만 답해줘: ["bullet1", "bullet2", "bullet3"]
   }
 }
 
+// 논문 제목 한국어 번역
+export async function generateTitleKo(title: string): Promise<string> {
+  try {
+    const msg = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 100,
+      messages: [{
+        role: 'user',
+        content: `다음 논문 제목을 한국어로 자연스럽게 번역해줘. 번역문만 답해줘.\n${title}`,
+      }]
+    })
+    return msg.content[0].type === 'text' ? msg.content[0].text.trim() : ''
+  } catch {
+    return ''
+  }
+}
+
 // 이메일 제목 생성 — [LabPaper] + 장난스러운 한 줄
 export async function generateEmailSubject(
   issueNumber: number,
