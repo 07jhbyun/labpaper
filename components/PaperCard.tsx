@@ -16,6 +16,7 @@ const REACTIONS: { type: ReactionType; emoji: string; label: string }[] = [
   { type: 'life_paper', emoji: '🔥', label: '인생논문' },
   { type: 'must_cite',  emoji: '😭', label: '나 이거 써야함' },
   { type: 'gpt_wrote',  emoji: '🤖', label: 'GPT가 썼냐' },
+  { type: 'what_the',   emoji: '🤯', label: '뭔 말이야?' },
 ]
 
 interface ReactionState {
@@ -23,6 +24,7 @@ interface ReactionState {
   life_paper_count: number
   must_cite_count: number
   gpt_wrote_count: number
+  what_the_count: number
   avg_stars: number
   star_count: number
 }
@@ -34,7 +36,7 @@ export default function PaperCard({ paper }: { paper: Paper }) {
   const [counts, setCounts] = useState<ReactionState>({
     why_here_count: 0, life_paper_count: 0,
     must_cite_count: 0, gpt_wrote_count: 0,
-    avg_stars: 0, star_count: 0,
+    what_the_count: 0, avg_stars: 0, star_count: 0,
   })
   const [scientist, setScientist] = useState('아인슈타인')
   const [sessionId, setSessionId] = useState('')

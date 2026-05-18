@@ -11,7 +11,7 @@ export const supabaseAdmin = createClient(
 )
 
 export type JournalTier = 'crown' | 'top' | 'high' | 'mid' | 'applied'
-export type ReactionType = 'why_here' | 'life_paper' | 'must_cite' | 'gpt_wrote' | 'star'
+export type ReactionType = 'why_here' | 'life_paper' | 'must_cite' | 'gpt_wrote' | 'star' | 'what_the'
 
 export interface Affiliation {
   name: string
@@ -64,19 +64,21 @@ export interface ReactionCounts {
   life_paper_count: number
   must_cite_count: number
   gpt_wrote_count: number
+  what_the_count: number
   avg_stars: number
   star_count: number
 }
 
 export const SCIENTIST_NAMES = [
-  '아인슈타인', '퀴리부인', '다윈', '뉴턴', '패러데이',
-  '맥스웰', '볼츠만', '플랑크', '보어', '하이젠베르크',
-  '슈뢰딩거', '디랙', '파울리', '페르미', '파인만',
-  '오펜하이머', '튜링', '노이만', '가우스', '오일러',
-  '라부아지에', '멘델레예프', '훔볼트', '훅', '반데르발스',
-  '아레니우스', '르샤틀리에', '노벨', '케쿨레', '리비히',
-  '플레밍', '왓슨', '크릭', '프랭클린', '멘델',
-  '베르셀리우스', '데이비', '패스퇴르', '코흐', '제너'
+  '피카츄', '파이리', '꼬부기', '이상해씨', '잠만보',
+  '뮤츠', '뮤', '리자몽', '거북왕', '이상해꽃',
+  '마자용', '가디', '윈디', '식스테일', '나인테일',
+  '파오리', '쥬레곤', '라이츄', '버터플', '비드릴',
+  '팬텀', '갸라도스', '프리저', '썬더', '파이어',
+  '루기아', '칠색조', '앤테이', '스이쿤', '라이코',
+  '엔테이', '아르세우스', '디아루가', '펄기아', '기라티나',
+  '가이오가', '그란돈', '레쿠쟈', '조로아크', '루카리오',
+  '게코가', '번치코', '물짱이',
 ]
 
 export function getSessionScientist(): string {
