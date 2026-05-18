@@ -82,9 +82,9 @@ export const SCIENTIST_NAMES = [
 ]
 
 export function getSessionScientist(): string {
-  if (typeof window === 'undefined') return '아인슈타인'
+  if (typeof window === 'undefined') return '피카츄'
   let name = localStorage.getItem('labpaper_scientist')
-  if (!name) {
+  if (!name || !SCIENTIST_NAMES.includes(name)) {
     name = SCIENTIST_NAMES[Math.floor(Math.random() * SCIENTIST_NAMES.length)]
     localStorage.setItem('labpaper_scientist', name)
   }
