@@ -8,8 +8,8 @@ import {
   fetchAbstract,
   JOURNAL_ISSN_MAP,
   JOURNAL_IF_MAP,
-  passesKeywordFilter,
   isReviewPaper,
+  getMatchedKeywords,
 } from '@/lib/fetch-papers'
 import { generateSummaryBullets, generateTitleKo, generateWeeklyHoroscope } from '@/lib/ai'
 
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     const { data: authors, error: authorsError } = await supabaseAdmin
       .from('followed_authors')
       .select('name')
-      .eq('status', 'active')
+      .in('status', ['active', 'auto_added'])
     if (authorsError) throw new Error(`followed_authors 조회 실패: ${authorsError.message}`)
     console.log(`[collect] step=${step} authors=${authors?.length ?? 0}`)
 
@@ -120,7 +120,11 @@ export async function POST(req: NextRequest) {
 
     // ── 6. 키워드/리뷰 필터 + 정렬 ───────────────────────────────
     step = 'filter-papers'
-    const keywordPassed = uniquePapers.filter(p => passesKeywordFilter(p.title || '', p.abstract || ''))
+    const { data: dbKeywords } = await supabaseAdmin.from('keywords').select('keyword')
+    const extraKeywords = (dbKeywords || []).map((k: any) => k.keyword)
+    const keywordPassed = uniquePapers.filter(p =>
+      getMatchedKeywords(p.title || '', p.abstract || '', extraKeywords).length > 0
+    )
     const selectedPapers = keywordPassed
       .filter(p => !isReviewPaper(p.title || '', p.abstract || ''))
       .sort((a, b) => (JOURNAL_IF_MAP[b.journal] || 0) - (JOURNAL_IF_MAP[a.journal] || 0))
@@ -133,6 +137,29 @@ export async function POST(req: NextRequest) {
         error: `수집된 논문 ${allRawPapers.length}편 중 키워드/리뷰 필터를 통과한 논문이 없습니다.`,
         debug: { raw: allRawPapers.length, unique: uniquePapers.length, keywordPassed: keywordPassed.length },
       })
+    }
+
+    // ── 6.5. all_papers 저장 (전체 키워드 통과 논문) ─────────────
+    step = 'save-all-papers'
+    await supabaseAdmin.from('all_papers').delete().eq('issue_number', newIssueNumber)
+    if (keywordPassed.length > 0) {
+      const tierOf = (j: string) => {
+        const IF = JOURNAL_IF_MAP[j] || 0
+        return IF >= 40 ? 'crown' : IF >= 25 ? 'top' : IF >= 15 ? 'high' : IF >= 8 ? 'mid' : 'applied'
+      }
+      await supabaseAdmin.from('all_papers').insert(
+        keywordPassed.map(p => ({
+          issue_number: newIssueNumber,
+          title: p.title,
+          authors: p.authors,
+          journal: p.journal,
+          journal_tier: tierOf(p.journal),
+          year: p.year,
+          doi: p.doi || null,
+          matched_keywords: getMatchedKeywords(p.title || '', p.abstract || '', extraKeywords),
+        }))
+      )
+      console.log(`[collect] step=${step} saved ${keywordPassed.length} papers`)
     }
 
     // ── 7. AI 요약 + 한국어 제목 + 소속 병렬 생성 ───────────────

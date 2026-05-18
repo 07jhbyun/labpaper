@@ -82,7 +82,7 @@ export const JOURNAL_IF_MAP: Record<string, number> = {
   'Cell Reports Physical Science': 8,
 }
 
-const KEYWORDS = [
+export const KEYWORDS = [
   'porous polymer', 'conjugated polymer', 'photocatal', 'electrocatal',
   'water treatment', 'water purification', 'membrane', 'covalent organic',
   'COF', 'H2O2', 'MOF', 'metal-organic framework', 'metal organic framework',
@@ -105,6 +105,12 @@ export function isReviewPaper(title: string, abstract: string): boolean {
   if (REVIEW_TITLE_KEYWORDS.some(kw => titleLower.includes(kw))) return true
   const abstractLower = abstract.toLowerCase()
   return REVIEW_ABSTRACT_PHRASES.some(phrase => abstractLower.includes(phrase))
+}
+
+export function getMatchedKeywords(title: string, abstract: string, extraKeywords: string[] = []): string[] {
+  const text = `${title} ${abstract}`.toLowerCase()
+  const all = [...new Set([...KEYWORDS, ...extraKeywords])]
+  return all.filter(kw => text.includes(kw.toLowerCase()))
 }
 
 export async function fetchPapersByAuthor(authorName: string): Promise<RawPaper[]> {

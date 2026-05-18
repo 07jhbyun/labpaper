@@ -39,8 +39,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
             <div className="flex gap-3 sm:gap-5 text-xs sm:text-sm min-w-0" style={{ color: '#6e6e73' }}>
               <Link href="/archive" className="hover:text-gray-900 transition-colors whitespace-nowrap">지난 호</Link>
+              <Link href="/all" className="hover:text-gray-900 transition-colors whitespace-nowrap">전체</Link>
               <Link href="/best" className="hover:text-gray-900 transition-colors whitespace-nowrap">베스트</Link>
-              <Link href="/suggest" className="hover:text-gray-900 transition-colors whitespace-nowrap">저자 제안</Link>
+              <Link href="/bookmarks" className="hover:text-gray-900 transition-colors whitespace-nowrap">관심</Link>
+              <Link href="/suggest" className="hover:text-gray-900 transition-colors whitespace-nowrap">제안</Link>
             </div>
             <Link href="/admin" className="ml-auto text-xs transition-colors flex-shrink-0" style={{ color: '#c7c7cc' }}>
               관리자

@@ -68,6 +68,12 @@ function passesKeywordFilter(title: string, abstract: string) {
   return KEYWORDS.some(kw => text.includes(kw.toLowerCase()))
 }
 
+function getMatchedKeywords(title: string, abstract: string, extraKeywords: string[] = []): string[] {
+  const text = `${title} ${abstract}`.toLowerCase()
+  const all = [...new Set([...KEYWORDS, ...extraKeywords])]
+  return all.filter(kw => text.includes(kw.toLowerCase()))
+}
+
 function isReviewPaper(title: string, abstract: string) {
   const t = title.toLowerCase()
   if (REVIEW_TITLE_KW.some(kw => t.includes(kw))) return true
@@ -425,7 +431,7 @@ export default async (req: Request) => {
     // ── 2. 기존 논문 + 저자 목록 병렬 조회 ──────────────────────
     step = 'fetch-meta'
     const [{ data: authors }, { data: existingPapers }, { data: noAbstractPapers }] = await Promise.all([
-      supabase.from('followed_authors').select('name').eq('status', 'active'),
+      supabase.from('followed_authors').select('name').in('status', ['active', 'auto_added']),
       supabase.from('papers').select('doi, title'),
       supabase.from('papers').select('id, doi').is('abstract', null).not('doi', 'is', null).limit(25),
     ])
@@ -475,16 +481,43 @@ export default async (req: Request) => {
 
     // ── 5. 키워드/리뷰 필터 + 정렬 ─────────────────────────────
     step = 'filter-papers'
-    const selectedPapers = uniquePapers
-      .filter(p => passesKeywordFilter(p.title || '', p.abstract || ''))
+    const { data: dbKeywords } = await supabase.from('keywords').select('keyword')
+    const extraKeywords = (dbKeywords || []).map((k: any) => k.keyword)
+    const keywordPassed = uniquePapers.filter(p =>
+      getMatchedKeywords(p.title || '', p.abstract || '', extraKeywords).length > 0
+    )
+    const selectedPapers = keywordPassed
       .filter(p => !isReviewPaper(p.title || '', p.abstract || ''))
       .sort((a, b) => (JOURNAL_IF_MAP[b.journal] || 0) - (JOURNAL_IF_MAP[a.journal] || 0))
       .slice(0, 15)
-    console.log(`[collect-bg] selected=${selectedPapers.length}`)
+    console.log(`[collect-bg] keywordPassed=${keywordPassed.length} selected=${selectedPapers.length}`)
 
     if (selectedPapers.length === 0) {
       console.warn(`[collect-bg] No papers passed filters. raw=${allRawPapers.length}`)
       return
+    }
+
+    // ── 5.5. all_papers 저장 ────────────────────────────────────
+    step = 'save-all-papers'
+    await supabase.from('all_papers').delete().eq('issue_number', newIssueNumber)
+    if (keywordPassed.length > 0) {
+      const tierOf = (j: string) => {
+        const IF = JOURNAL_IF_MAP[j] || 0
+        return IF >= 40 ? 'crown' : IF >= 25 ? 'top' : IF >= 15 ? 'high' : IF >= 8 ? 'mid' : 'applied'
+      }
+      await supabase.from('all_papers').insert(
+        keywordPassed.map((p: any) => ({
+          issue_number: newIssueNumber,
+          title: p.title,
+          authors: p.authors,
+          journal: p.journal,
+          journal_tier: tierOf(p.journal),
+          year: p.year,
+          doi: p.doi || null,
+          matched_keywords: getMatchedKeywords(p.title || '', p.abstract || '', extraKeywords),
+        }))
+      )
+      console.log(`[collect-bg] saved ${keywordPassed.length} all_papers`)
     }
 
     // ── 6. AI 요약 + 한국어 제목 + 소속 전체 병렬 생성 ─────────

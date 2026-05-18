@@ -34,15 +34,52 @@ export default function AdminPage() {
   const [newSub, setNewSub] = useState({ email: '', name: '' })
   const [notifyResult, setNotifyResult] = useState('')
   const [sendingNotify, setSendingNotify] = useState(false)
+  const [autoAuthors, setAutoAuthors] = useState<any[]>([])
+  const [autoKeywords, setAutoKeywords] = useState<any[]>([])
 
   function checkPassword() {
     if (password === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
       setAuthed(true)
       loadSuggestions()
       loadSubscribers()
+      loadAutoAuthors()
+      loadAutoKeywords()
     } else {
       alert('비밀번호가 틀렸습니다')
     }
+  }
+
+  async function loadAutoAuthors() {
+    const { data } = await supabaseAdmin
+      .from('followed_authors')
+      .select('*')
+      .eq('status', 'auto_added')
+      .order('created_at', { ascending: false })
+    setAutoAuthors(data || [])
+  }
+
+  async function loadAutoKeywords() {
+    const { data } = await supabaseAdmin
+      .from('keywords')
+      .select('*')
+      .eq('source', 'auto_added')
+      .order('created_at', { ascending: false })
+    setAutoKeywords(data || [])
+  }
+
+  async function promoteAutoAuthor(id: string) {
+    await supabaseAdmin.from('followed_authors').update({ status: 'active' }).eq('id', id)
+    loadAutoAuthors()
+  }
+
+  async function deleteAutoAuthor(id: string) {
+    await supabaseAdmin.from('followed_authors').delete().eq('id', id)
+    loadAutoAuthors()
+  }
+
+  async function deleteAutoKeyword(id: string) {
+    await supabaseAdmin.from('keywords').delete().eq('id', id)
+    loadAutoKeywords()
   }
 
   async function loadSuggestions() {
@@ -297,6 +334,63 @@ export default function AdminPage() {
                   style={{ color: '#be123c' }}
                 >
                   삭제
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* 자동 추가된 저자 */}
+      <section style={sectionStyle}>
+        <h2 className="text-sm font-semibold mb-3" style={{ color: '#3a3a3c' }}>
+          자동 추가된 저자 ({autoAuthors.length})
+        </h2>
+        <p className="text-xs mb-3" style={{ color: '#aeaeb2' }}>관심 버튼으로 자동 추가됨. 승인하면 다음 수집부터 팔로우합니다.</p>
+        {autoAuthors.length === 0 ? (
+          <p className="text-sm" style={{ color: '#86868b' }}>자동 추가된 저자가 없습니다.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {autoAuthors.map(a => (
+              <div key={a.id} className="flex items-center justify-between px-3 py-2"
+                style={{ backgroundColor: '#f5f5f7', borderRadius: 8 }}>
+                <span className="text-sm" style={{ color: '#1d1d1f' }}>{a.name}</span>
+                <div className="flex gap-2">
+                  <button onClick={() => promoteAutoAuthor(a.id)}
+                    className="text-xs font-medium px-3 py-1 transition-opacity hover:opacity-70"
+                    style={{ backgroundColor: '#f0fdf4', color: '#166534', borderRadius: 6 }}>
+                    팔로우 승인
+                  </button>
+                  <button onClick={() => deleteAutoAuthor(a.id)}
+                    className="text-xs transition-opacity hover:opacity-60"
+                    style={{ color: '#be123c' }}>
+                    삭제
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* 자동 추가된 키워드 */}
+      <section style={sectionStyle}>
+        <h2 className="text-sm font-semibold mb-3" style={{ color: '#3a3a3c' }}>
+          자동 추가된 키워드 ({autoKeywords.length})
+        </h2>
+        <p className="text-xs mb-3" style={{ color: '#aeaeb2' }}>관심 버튼으로 자동 추가됨. 다음 수집부터 추가 필터로 사용됩니다.</p>
+        {autoKeywords.length === 0 ? (
+          <p className="text-sm" style={{ color: '#86868b' }}>자동 추가된 키워드가 없습니다.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {autoKeywords.map(k => (
+              <div key={k.id} className="flex items-center gap-1.5 px-2.5 py-1"
+                style={{ backgroundColor: '#f0f4ff', borderRadius: 6 }}>
+                <span className="text-xs" style={{ color: '#3b5bdb' }}>#{k.keyword}</span>
+                <button onClick={() => deleteAutoKeyword(k.id)}
+                  className="text-xs font-bold transition-opacity hover:opacity-60"
+                  style={{ color: '#be123c' }}>
+                  ×
                 </button>
               </div>
             ))}
