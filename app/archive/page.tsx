@@ -10,7 +10,7 @@ export default async function ArchivePage() {
     .order('issue_number', { ascending: false })
 
   return (
-    <main className="max-w-3xl mx-auto px-5 py-8">
+    <main className="max-w-3xl mx-auto px-4 sm:px-5 py-5 sm:py-8">
       <h1 className="text-xl font-bold mb-6" style={{ color: '#1d1d1f' }}>지난 호</h1>
 
       <div className="space-y-2">

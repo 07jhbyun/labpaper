@@ -52,7 +52,7 @@ export default async function BestPage() {
   const year = now.getFullYear()
 
   return (
-    <main className="max-w-3xl mx-auto px-5 py-8">
+    <main className="max-w-3xl mx-auto px-4 sm:px-5 py-5 sm:py-8">
       <h1 className="text-xl font-bold mb-6" style={{ color: '#1d1d1f' }}>베스트 논문</h1>
 
       <section className="mb-10">

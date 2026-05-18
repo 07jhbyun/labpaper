@@ -124,11 +124,11 @@ export default function PaperCard({ paper }: { paper: Paper }) {
 
   return (
     <article
+      className="p-4 sm:p-5"
       style={{
         backgroundColor: '#ffffff',
         boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
         borderRadius: 12,
-        padding: 20,
       }}
     >
       {/* 저널 배지 + IF */}
@@ -189,11 +189,10 @@ export default function PaperCard({ paper }: { paper: Paper }) {
       )}
 
       {/* TOC 이미지 + 핵심 결과 */}
-      <div className="flex gap-4 mb-4">
-        {/* TOC 영역: 120×90, radius 8 */}
+      <div className="flex flex-col sm:flex-row gap-3 mb-4">
+        {/* TOC 영역: 모바일 full-width / 데스크톱 120×90 */}
         <div
-          className="flex-shrink-0 overflow-hidden"
-          style={{ width: 120, height: 90, borderRadius: 8 }}
+          className="overflow-hidden rounded-lg w-full sm:w-[120px] h-36 sm:h-[90px] sm:flex-shrink-0"
         >
           {imgSrc ? (
             <img
@@ -287,11 +286,12 @@ export default function PaperCard({ paper }: { paper: Paper }) {
             <button
               key={type}
               onClick={() => toggleReaction(type)}
-              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full transition-all"
+              className="flex items-center gap-1.5 text-xs px-3 rounded-full transition-all"
               style={{
                 backgroundColor: active ? '#e8f0fe' : '#f5f5f7',
                 color: active ? '#1a73e8' : '#6e6e73',
                 border: `1px solid ${active ? '#c5d8fd' : 'transparent'}`,
+                minHeight: 44,
               }}
             >
               <span>{emoji}</span>
@@ -306,24 +306,26 @@ export default function PaperCard({ paper }: { paper: Paper }) {
         })}
 
         {/* 별점 */}
-        <div className="ml-auto flex items-center gap-0.5">
-          {[1, 2, 3, 4, 5].map((v) => (
-            <button
-              key={v}
-              onClick={() => rateStar(v)}
-              onMouseEnter={() => setHoverStar(v)}
-              onMouseLeave={() => setHoverStar(0)}
-              className="text-lg leading-none transition-colors"
-              style={{ color: v <= (hoverStar || myStar) ? '#ff9f0a' : '#e5e5ea' }}
-            >
-              ★
-            </button>
-          ))}
-          {counts.avg_stars > 0 && (
-            <span className="text-xs ml-1" style={{ color: '#86868b' }}>
-              {Number(counts.avg_stars).toFixed(1)} ({counts.star_count})
-            </span>
-          )}
+        <div className="ml-auto flex items-center" style={{ minHeight: 44 }}>
+          <div className="flex items-center gap-0.5">
+            {[1, 2, 3, 4, 5].map((v) => (
+              <button
+                key={v}
+                onClick={() => rateStar(v)}
+                onMouseEnter={() => setHoverStar(v)}
+                onMouseLeave={() => setHoverStar(0)}
+                className="text-xl transition-colors p-1"
+                style={{ color: v <= (hoverStar || myStar) ? '#ff9f0a' : '#e5e5ea' }}
+              >
+                ★
+              </button>
+            ))}
+            {counts.avg_stars > 0 && (
+              <span className="text-xs ml-1" style={{ color: '#86868b' }}>
+                {Number(counts.avg_stars).toFixed(1)} ({counts.star_count})
+              </span>
+            )}
+          </div>
         </div>
       </div>
 

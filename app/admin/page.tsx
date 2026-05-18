@@ -177,7 +177,7 @@ export default function AdminPage() {
   }
 
   return (
-    <main className="max-w-3xl mx-auto px-5 py-8 space-y-5">
+    <main className="max-w-3xl mx-auto px-4 sm:px-5 py-5 sm:py-8 space-y-5">
       <h1 className="text-xl font-bold" style={{ color: '#1d1d1f' }}>관리자</h1>
 
       {/* 논문 자동 수집 */}

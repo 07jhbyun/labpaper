@@ -33,16 +33,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             borderBottom: '1px solid rgba(0,0,0,0.06)',
           }}
         >
-          <div className="max-w-3xl mx-auto px-5 h-12 flex items-center gap-6">
-            <Link href="/" className="font-semibold text-sm" style={{ color: '#1d1d1f' }}>
+          <div className="max-w-3xl mx-auto px-4 sm:px-5 h-12 flex items-center gap-3 sm:gap-6">
+            <Link href="/" className="font-semibold text-sm flex-shrink-0" style={{ color: '#1d1d1f' }}>
               LabPaper
             </Link>
-            <div className="flex gap-5 text-sm" style={{ color: '#6e6e73' }}>
-              <Link href="/archive" className="hover:text-gray-900 transition-colors">지난 호</Link>
-              <Link href="/best" className="hover:text-gray-900 transition-colors">베스트</Link>
-              <Link href="/suggest" className="hover:text-gray-900 transition-colors">저자 제안</Link>
+            <div className="flex gap-3 sm:gap-5 text-xs sm:text-sm min-w-0" style={{ color: '#6e6e73' }}>
+              <Link href="/archive" className="hover:text-gray-900 transition-colors whitespace-nowrap">지난 호</Link>
+              <Link href="/best" className="hover:text-gray-900 transition-colors whitespace-nowrap">베스트</Link>
+              <Link href="/suggest" className="hover:text-gray-900 transition-colors whitespace-nowrap">저자 제안</Link>
             </div>
-            <Link href="/admin" className="ml-auto text-xs transition-colors" style={{ color: '#c7c7cc' }}>
+            <Link href="/admin" className="ml-auto text-xs transition-colors flex-shrink-0" style={{ color: '#c7c7cc' }}>
               관리자
             </Link>
           </div>

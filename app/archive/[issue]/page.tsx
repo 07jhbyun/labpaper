@@ -30,7 +30,7 @@ export default async function ArchiveIssuePage({ params }: { params: Promise<{ i
   })
 
   return (
-    <main className="max-w-3xl mx-auto px-5 py-8">
+    <main className="max-w-3xl mx-auto px-4 sm:px-5 py-5 sm:py-8">
       <div className="mb-6">
         <Link
           href="/archive"
