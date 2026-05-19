@@ -90,6 +90,7 @@ export const KEYWORDS = [
   'deionization', 'deep eutectic solvent', 'lithium battery recycling',
   'contact electrification', 'heterogeneous catalysis', 'radical photocatalysis',
   'organic semiconductor', 'bandgap', 'band gap', 'visible light',
+  'nitrate reduction',
 ]
 
 function stripHtml(str: string): string {

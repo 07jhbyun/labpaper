@@ -57,6 +57,7 @@ const KEYWORDS = [
   'deionization', 'deep eutectic solvent', 'lithium battery recycling',
   'contact electrification', 'heterogeneous catalysis', 'radical photocatalysis',
   'organic semiconductor', 'bandgap', 'band gap', 'visible light',
+  'nitrate reduction',
 ]
 const REVIEW_TITLE_KW = ['review', 'perspective', 'progress', 'outlook', 'highlight']
 const REVIEW_ABSTRACT_KW = ['this review', 'in this review', 'we review']
