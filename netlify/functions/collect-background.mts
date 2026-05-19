@@ -451,12 +451,31 @@ export default async (req: Request) => {
         })).then(() => console.log(`[collect-bg] backfilled abstract for up to ${noAbstractPapers.length} papers`))
       : Promise.resolve()
 
-    // ── 3. 저자 + 저널 전체 병렬 수집 ───────────────────────────
+    // ── 3. 저자 + 저널 수집 (Crossref rate limit 대비 배치 처리) ──
     step = 'collect-papers'
-    const [authorResults, journalResults] = await Promise.all([
-      Promise.all((authors || []).slice(0, 10).map(a => fetchByAuthor(a.name))),
-      Promise.all(Object.entries(JOURNAL_ISSN_MAP).map(([name, issn]) => fetchByJournal(name, issn))),
-    ])
+
+    // 저자: 전원 검색 (slice 제거), 5명씩 배치
+    const authorList = authors || []
+    const authorBatches: typeof authorList[] = []
+    for (let i = 0; i < authorList.length; i += 5) authorBatches.push(authorList.slice(i, i + 5))
+    const authorResults: any[][] = []
+    for (const batch of authorBatches) {
+      const res = await Promise.all(batch.map(a => fetchByAuthor(a.name)))
+      authorResults.push(...res)
+      if (authorBatches.indexOf(batch) < authorBatches.length - 1) await new Promise(r => setTimeout(r, 300))
+    }
+
+    // 저널: 8개씩 배치로 나눠 Crossref 동시 요청 수 제한
+    const journalEntries = Object.entries(JOURNAL_ISSN_MAP)
+    const journalBatches: typeof journalEntries[] = []
+    for (let i = 0; i < journalEntries.length; i += 8) journalBatches.push(journalEntries.slice(i, i + 8))
+    const journalResults: any[][] = []
+    for (const batch of journalBatches) {
+      const res = await Promise.all(batch.map(([name, issn]) => fetchByJournal(name, issn)))
+      journalResults.push(...res)
+      if (journalBatches.indexOf(batch) < journalBatches.length - 1) await new Promise(r => setTimeout(r, 500))
+    }
+
     const allRawPapers = [...authorResults.flat(), ...journalResults.flat()]
     console.log(`[collect-bg] raw=${allRawPapers.length}`)
 
