@@ -92,6 +92,10 @@ export const KEYWORDS = [
   'organic semiconductor', 'bandgap', 'band gap', 'visible light',
 ]
 
+function stripHtml(str: string): string {
+  return str.replace(/<[^>]*>/g, '').trim()
+}
+
 const REVIEW_TITLE_KEYWORDS = ['review', 'perspective', 'progress', 'outlook', 'highlight']
 const REVIEW_ABSTRACT_PHRASES = ['this review', 'in this review', 'we review']
 
@@ -132,12 +136,12 @@ export async function fetchPapersByAuthor(authorName: string): Promise<RawPaper[
     return (papersData.data || [])
       .filter((p: any) => p.year >= new Date().getFullYear())
       .map((p: any) => ({
-        title: p.title,
+        title: stripHtml(p.title || ''),
         authors: p.authors?.map((a: any) => a.name).join(', ') || authorName,
         journal: p.journal?.name || 'Unknown',
         year: p.year,
         doi: p.externalIds?.DOI,
-        abstract: p.abstract || p.tldr?.text || '',
+        abstract: stripHtml(p.abstract || p.tldr?.text || ''),
       }))
   } catch (e) {
     console.error(`Failed to fetch papers for ${authorName}:`, e)
@@ -158,14 +162,14 @@ export async function fetchPapersByJournal(journalName: string, issn: string): P
     const data = await res.json()
 
     return (data.message?.items || []).map((item: any) => ({
-      title: Array.isArray(item.title) ? item.title[0] : item.title,
+      title: stripHtml(Array.isArray(item.title) ? item.title[0] : item.title || ''),
       authors: item.author
         ?.map((a: any) => `${a.given || ''} ${a.family || ''}`.trim())
         .join(', ') || '',
       journal: journalName,
       year: item.published?.['date-parts']?.[0]?.[0] || new Date().getFullYear(),
       doi: item.DOI,
-      abstract: item.abstract?.replace(/<[^>]*>/g, '') || '',
+      abstract: stripHtml(item.abstract || ''),
     }))
   } catch (e) {
     console.error(`Failed to fetch papers for journal ${journalName}:`, e)
@@ -192,7 +196,7 @@ export async function fetchAbstract(doi: string): Promise<string | null> {
     )
     if (res.ok) {
       const data = await res.json()
-      if (data.abstract) return data.abstract as string
+      if (data.abstract) return stripHtml(data.abstract as string)
     }
   } catch {}
 

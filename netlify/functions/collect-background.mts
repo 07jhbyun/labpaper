@@ -63,6 +63,10 @@ const REVIEW_ABSTRACT_KW = ['this review', 'in this review', 'we review']
 
 // ── 유틸 ────────────────────────────────────────────────────────────────────
 
+function stripHtml(str: string): string {
+  return str.replace(/<[^>]*>/g, '').trim()
+}
+
 function passesKeywordFilter(title: string, abstract: string) {
   const text = `${title} ${abstract}`.toLowerCase()
   return KEYWORDS.some(kw => text.includes(kw.toLowerCase()))
@@ -108,12 +112,12 @@ async function fetchByJournal(journalName: string, issn: string) {
     )
     const data = await res.json()
     return (data.message?.items || []).map((item: any) => ({
-      title: Array.isArray(item.title) ? item.title[0] : item.title,
+      title: stripHtml(Array.isArray(item.title) ? item.title[0] : item.title || ''),
       authors: item.author?.map((a: any) => `${a.given || ''} ${a.family || ''}`.trim()).join(', ') || '',
       journal: journalName,
       year: item.published?.['date-parts']?.[0]?.[0] || new Date().getFullYear(),
       doi: item.DOI,
-      abstract: item.abstract?.replace(/<[^>]*>/g, '') || '',
+      abstract: stripHtml(item.abstract || ''),
       source: 'auto',
     }))
   } catch {
@@ -138,12 +142,12 @@ async function fetchByAuthor(authorName: string) {
     return (papersData.data || [])
       .filter((p: any) => p.year >= new Date().getFullYear())
       .map((p: any) => ({
-        title: p.title,
+        title: stripHtml(p.title || ''),
         authors: p.authors?.map((a: any) => a.name).join(', ') || authorName,
         journal: p.journal?.name || 'Unknown',
         year: p.year,
         doi: p.externalIds?.DOI,
-        abstract: p.abstract || p.tldr?.text || '',
+        abstract: stripHtml(p.abstract || p.tldr?.text || ''),
         source: 'auto',
       }))
   } catch {
@@ -162,7 +166,7 @@ async function fetchAbstract(doi: string): Promise<string | null> {
     )
     if (res.ok) {
       const data = await res.json()
-      if (data.abstract) return data.abstract as string
+      if (data.abstract) return stripHtml(data.abstract as string)
     }
   } catch {}
 

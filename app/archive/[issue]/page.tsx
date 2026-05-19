@@ -4,7 +4,7 @@ import HoroscopeCard from '@/components/HoroscopeCard'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
-export const revalidate = 3600
+export const dynamic = 'force-dynamic'
 
 export default async function ArchiveIssuePage({ params }: { params: Promise<{ issue: string }> }) {
   const { issue: issueParam } = await params
