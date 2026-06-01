@@ -86,7 +86,7 @@ export async function generateEmailSubject(
 이번 주 논문 키워드: ${context}
 제목 텍스트만 답해줘. 따옴표 없이.`
       }]
-    })
+    }))
 
     const text = msg.content[0].type === 'text' ? msg.content[0].text.trim() : ''
     return `[LabPaper] ${text}`
