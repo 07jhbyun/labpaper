@@ -22,6 +22,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No issue found' }, { status: 404 })
     }
 
+    // ── 중복 발송 방지 ──────────────────────────────────────────
+    const { data: existingLog } = await supabaseAdmin
+      .from('email_logs')
+      .select('id, sent_at')
+      .eq('issue_number', issue.issue_number)
+      .single()
+
+    if (existingLog) {
+      return NextResponse.json({
+        success: true,
+        sent: 0,
+        message: `Vol.${issue.issue_number} 이미 발송됨 (${existingLog.sent_at}) — 중복 방지`,
+      })
+    }
+
     // 해당 이슈 논문 조회
     const { data: papers } = await supabaseAdmin
       .from('papers')
@@ -43,7 +58,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, sent: 0, message: '구독자 없음' })
     }
 
-    // 제목 한 번만 생성 (구독자 수와 무관)
+    // 제목 한 번만 생성
     const subject = await generateEmailSubject(
       issue.issue_number,
       papers.map((p: any) => p.title)
@@ -70,6 +85,16 @@ export async function POST(req: NextRequest) {
         console.error(`Failed to send to ${sub.email}:`, e)
         errors.push(sub.email)
       }
+    }
+
+    // ── 발송 기록 저장 (중복 방지용) ───────────────────────────
+    if (sent > 0) {
+      await supabaseAdmin
+        .from('email_logs')
+        .insert({ issue_number: issue.issue_number, recipients: sent })
+        .then(({ error }) => {
+          if (error) console.error('email_logs insert error:', error.message)
+        })
     }
 
     return NextResponse.json({ success: true, sent, errors: errors.length ? errors : undefined })

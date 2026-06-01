@@ -1,4 +1,5 @@
 import { supabaseAdmin, JOURNAL_COLORS, JOURNAL_IF_CLIENT_MAP } from '@/lib/supabase'
+import PageViewTracker from '@/components/PageViewTracker'
 
 export const dynamic = 'force-dynamic'
 
@@ -58,6 +59,7 @@ export default async function BestPage() {
 
   return (
     <main className="max-w-3xl mx-auto px-4 sm:px-5 py-5 sm:py-8">
+      <PageViewTracker page="best" />
       <h1 className="text-xl font-bold mb-6" style={{ color: '#1d1d1f' }}>베스트 논문</h1>
 
       <section className="mb-10">

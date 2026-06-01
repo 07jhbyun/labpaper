@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase, JOURNAL_COLORS } from '@/lib/supabase'
+import PageViewTracker from '@/components/PageViewTracker'
 
 export default function BookmarksPage() {
   const [bookmarks, setBookmarks] = useState<any[]>([])
@@ -39,6 +40,7 @@ export default function BookmarksPage() {
 
   return (
     <main className="max-w-3xl mx-auto px-4 sm:px-5 py-5 sm:py-8">
+      <PageViewTracker page="bookmarks" />
       <h1 className="text-xl font-bold mb-1" style={{ color: '#1d1d1f' }}>관심 논문</h1>
       <p className="text-sm mb-6" style={{ color: '#86868b' }}>
         {bookmarks.length}편 저장됨

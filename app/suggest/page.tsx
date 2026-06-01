@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { supabase } from '@/lib/supabase'
 
 export default function SuggestPage() {
   const [text, setText] = useState('')
@@ -12,9 +11,10 @@ export default function SuggestPage() {
     e.preventDefault()
     if (!text.trim()) return
     setLoading(true)
-    await supabase.from('author_suggestions').insert({
-      name: text.trim().slice(0, 100),
-      reason: text.trim(),
+    await fetch('/api/suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text.trim() }),
     })
     setLoading(false)
     setSubmitted(true)

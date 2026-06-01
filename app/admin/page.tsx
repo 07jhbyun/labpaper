@@ -36,6 +36,13 @@ export default function AdminPage() {
   const [sendingNotify, setSendingNotify] = useState(false)
   const [autoAuthors, setAutoAuthors] = useState<any[]>([])
   const [autoKeywords, setAutoKeywords] = useState<any[]>([])
+  const [stats, setStats] = useState<{
+    total: number
+    today: number
+    week: number
+    byPage: Record<string, number>
+    daily: { date: string; count: number }[]
+  } | null>(null)
 
   function checkPassword() {
     if (password === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
@@ -44,6 +51,7 @@ export default function AdminPage() {
       loadSubscribers()
       loadAutoAuthors()
       loadAutoKeywords()
+      loadStats()
     } else {
       alert('비밀번호가 틀렸습니다')
     }
@@ -56,6 +64,62 @@ export default function AdminPage() {
       .eq('status', 'auto_added')
       .order('created_at', { ascending: false })
     setAutoAuthors(data || [])
+  }
+
+  async function loadStats() {
+    const now = new Date()
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+    const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    const days7Start = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000)
+    days7Start.setHours(0, 0, 0, 0)
+
+    const [totalRes, todayRes, weekRes, byPageRes, dailyRes] = await Promise.all([
+      supabaseAdmin.from('page_views').select('session_id', { count: 'exact', head: false }),
+      supabaseAdmin.from('page_views').select('session_id').gte('visited_at', todayStart),
+      supabaseAdmin.from('page_views').select('session_id').gte('visited_at', weekStart),
+      supabaseAdmin.from('page_views').select('page, session_id'),
+      supabaseAdmin.from('page_views').select('visited_at, session_id').gte('visited_at', days7Start.toISOString()),
+    ])
+
+    // 고유 세션 수 집계
+    const unique = (rows: any[] | null) =>
+      new Set((rows || []).map((r: any) => r.session_id)).size
+
+    // 페이지별 고유 세션
+    const byPage: Record<string, number> = {}
+    for (const row of byPageRes.data || []) {
+      if (!byPage[row.page]) byPage[row.page] = 0
+    }
+    const pageGroups: Record<string, Set<string>> = {}
+    for (const row of byPageRes.data || []) {
+      if (!pageGroups[row.page]) pageGroups[row.page] = new Set()
+      pageGroups[row.page].add(row.session_id)
+    }
+    for (const [page, sessions] of Object.entries(pageGroups)) {
+      byPage[page] = sessions.size
+    }
+
+    // 일별 고유 세션 (최근 7일)
+    const dailyGroups: Record<string, Set<string>> = {}
+    for (const row of dailyRes.data || []) {
+      const date = row.visited_at.slice(0, 10)
+      if (!dailyGroups[date]) dailyGroups[date] = new Set()
+      dailyGroups[date].add(row.session_id)
+    }
+    const daily = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(days7Start)
+      d.setDate(d.getDate() + i)
+      const date = d.toISOString().slice(0, 10)
+      return { date, count: dailyGroups[date]?.size || 0 }
+    })
+
+    setStats({
+      total: unique(totalRes.data),
+      today: unique(todayRes.data),
+      week: unique(weekRes.data),
+      byPage,
+      daily,
+    })
   }
 
   async function loadAutoKeywords() {
@@ -216,6 +280,84 @@ export default function AdminPage() {
   return (
     <main className="max-w-3xl mx-auto px-4 sm:px-5 py-5 sm:py-8 space-y-5">
       <h1 className="text-xl font-bold" style={{ color: '#1d1d1f' }}>관리자</h1>
+
+      {/* 방문자 통계 */}
+      <section style={sectionStyle}>
+        <h2 className="text-sm font-semibold mb-4" style={{ color: '#3a3a3c' }}>방문자 통계</h2>
+        {!stats ? (
+          <p className="text-sm" style={{ color: '#86868b' }}>로딩 중...</p>
+        ) : (
+          <div className="space-y-5">
+            {/* 요약 숫자 */}
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label: '오늘', value: stats.today },
+                { label: '최근 7일', value: stats.week },
+                { label: '누적', value: stats.total },
+              ].map(({ label, value }) => (
+                <div key={label} className="text-center py-3 rounded-xl"
+                  style={{ backgroundColor: '#f5f5f7' }}>
+                  <p className="text-2xl font-bold" style={{ color: '#1d1d1f' }}>{value}</p>
+                  <p className="text-xs mt-0.5" style={{ color: '#86868b' }}>{label}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* 페이지별 */}
+            <div>
+              <p className="text-xs font-medium mb-2" style={{ color: '#6e6e73' }}>페이지별 방문 (고유 세션)</p>
+              <div className="space-y-1.5">
+                {([
+                  { key: 'home', label: '메인 (/)' },
+                  { key: 'all', label: '전체 논문' },
+                  { key: 'bookmarks', label: '관심 논문' },
+                  { key: 'best', label: '베스트' },
+                ] as { key: string; label: string }[]).map(({ key, label }) => {
+                  const count = stats.byPage[key] || 0
+                  const max = Math.max(...Object.values(stats.byPage), 1)
+                  return (
+                    <div key={key} className="flex items-center gap-2">
+                      <span className="text-xs w-24 flex-shrink-0" style={{ color: '#3a3a3c' }}>{label}</span>
+                      <div className="flex-1 rounded-full overflow-hidden" style={{ backgroundColor: '#f5f5f7', height: 6 }}>
+                        <div className="h-full rounded-full" style={{
+                          width: `${(count / max) * 100}%`,
+                          backgroundColor: '#0071e3',
+                          transition: 'width 0.4s ease',
+                        }} />
+                      </div>
+                      <span className="text-xs w-6 text-right" style={{ color: '#86868b' }}>{count}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* 7일 일별 바 차트 */}
+            <div>
+              <p className="text-xs font-medium mb-2" style={{ color: '#6e6e73' }}>최근 7일 일별 방문자</p>
+              <div className="flex items-end gap-1.5" style={{ height: 60 }}>
+                {stats.daily.map(({ date, count }) => {
+                  const max = Math.max(...stats.daily.map(d => d.count), 1)
+                  const heightPct = (count / max) * 100
+                  const label = new Date(date + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })
+                  return (
+                    <div key={date} className="flex flex-col items-center gap-1 flex-1">
+                      <span className="text-xs" style={{ color: '#86868b', fontSize: 10 }}>{count || ''}</span>
+                      <div className="w-full rounded-t" style={{
+                        height: `${Math.max(heightPct, count > 0 ? 8 : 2)}%`,
+                        minHeight: 2,
+                        backgroundColor: count > 0 ? '#0071e3' : '#e5e5ea',
+                        transition: 'height 0.4s ease',
+                      }} />
+                      <span style={{ color: '#aeaeb2', fontSize: 9, whiteSpace: 'nowrap' }}>{label}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* 논문 자동 수집 */}
       <section style={sectionStyle}>

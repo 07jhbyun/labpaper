@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import PaperCard from '@/components/PaperCard'
 import HoroscopeCard from '@/components/HoroscopeCard'
+import PageViewTracker from '@/components/PageViewTracker'
 import type { Paper, Issue } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -42,6 +43,7 @@ export default async function HomePage() {
 
   return (
     <main className="max-w-3xl mx-auto px-4 sm:px-5 py-5 sm:py-8">
+      <PageViewTracker page="home" />
       {/* 헤더 */}
       <div className="flex items-start justify-between mb-2">
         <div>

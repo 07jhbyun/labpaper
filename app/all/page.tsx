@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase, JOURNAL_COLORS } from '@/lib/supabase'
+import PageViewTracker from '@/components/PageViewTracker'
 
 const PAGE_SIZE = 20
 
@@ -96,6 +97,7 @@ export default function AllPage() {
 
   return (
     <main className="max-w-3xl mx-auto px-4 sm:px-5 py-5 sm:py-8">
+      <PageViewTracker page="all" />
       <h1 className="text-xl font-bold mb-1" style={{ color: '#1d1d1f' }}>전체 논문</h1>
       <p className="text-sm mb-6" style={{ color: '#86868b' }}>
         이번 호 키워드 필터 통과 논문 {papers.length}편
