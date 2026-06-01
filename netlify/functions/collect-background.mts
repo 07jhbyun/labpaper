@@ -1,7 +1,6 @@
 import type { Config } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
-import { Resend } from 'resend'
 
 // ── 설정 ────────────────────────────────────────────────────────────────────
 
@@ -333,76 +332,7 @@ JSON만 답해줘:
   }
 }
 
-async function generateSubject(client: Anthropic, issueNumber: number, titles: string[]) {
-  try {
-    const msg = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 60,
-      messages: [{
-        role: 'user',
-        content: `이번 주 LabPaper 뉴스레터 이메일 제목을 한 줄로 만들어줘.
-톤: 장난스럽고 약간 도발적, 대학원생 감성. 이모지 1개 포함.
-예시: "이번 주 논문 안 읽니? 👀", "당신의 라이벌은 지금 이 논문 읽는 중입니다"
-키워드: ${titles.slice(0, 5).join(' / ')}
-제목 텍스트만 답해줘. 따옴표 없이.`
-      }]
-    })
-    const text = msg.content[0].type === 'text' ? msg.content[0].text.trim() : ''
-    return `[LabPaper] ${text}`
-  } catch {
-    const fallbacks = ['이번 주 논문 안 읽니? 👀', '당신의 라이벌은 지금 읽는 중 📄', `Vol.${issueNumber} 도착했습니다 🔬`]
-    return `[LabPaper] ${fallbacks[issueNumber % fallbacks.length]}`
-  }
-}
 
-// ── 이메일 ───────────────────────────────────────────────────────────────────
-
-const TIER_STYLES: Record<string, { bg: string; text: string; icon: string }> = {
-  crown: { bg: '#fff7e6', text: '#b45309', icon: '👑' },
-  top:   { bg: '#f3e8ff', text: '#6b21a8', icon: '🏆' },
-  high:  { bg: '#eff6ff', text: '#1d4ed8', icon: '🥇' },
-  mid:   { bg: '#f0fdf4', text: '#166534', icon: '🥈' },
-  applied: { bg: '#f9fafb', text: '#374151', icon: '🥉' },
-}
-
-function buildEmailHtml(issueNumber: number, papers: any[], horoscope: any, name?: string) {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://labpaper.netlify.app'
-  const greeting = name ? `안녕하세요, ${name}님!` : '안녕하세요!'
-  const papersHtml = papers.map((p, i) => {
-    const style = TIER_STYLES[p.journal_tier] ?? TIER_STYLES['applied']
-    const doiUrl = p.doi ? `https://doi.org/${p.doi}` : siteUrl
-    const isLast = i === papers.length - 1
-    return `<div style="padding:14px 20px;${isLast ? '' : 'border-bottom:1px solid #f2f2f7;'}">
-      <div style="margin-bottom:5px;">
-        <span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;background-color:${style.bg};color:${style.text};">${style.icon} ${p.journal}</span>
-        ${JOURNAL_IF_MAP[p.journal] ? `<span style="font-size:11px;color:#86868b;margin-left:6px;">IF ${JOURNAL_IF_MAP[p.journal].toFixed(1)}</span>` : ''}
-      </div>
-      <a href="${doiUrl}" style="font-size:14px;font-weight:600;color:#1d1d1f;text-decoration:none;line-height:1.5;">${p.title}</a>
-    </div>`
-  }).join('')
-
-  return `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background-color:#f5f5f7;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;">
-<div style="max-width:560px;margin:0 auto;padding:40px 20px;">
-  <div style="text-align:center;margin-bottom:28px;">
-    <h1 style="font-size:26px;font-weight:700;color:#1d1d1f;margin:0 0 4px;">LabPaper</h1>
-    <p style="font-size:13px;color:#86868b;margin:0;">Vol. ${issueNumber} · 주간 논문 뉴스레터</p>
-  </div>
-  <p style="font-size:15px;color:#3a3a3c;margin:0 0 24px;">${greeting} 이번 주 논문 ${papers.length}편이 도착했습니다.</p>
-  <div style="text-align:center;margin-bottom:28px;">
-    <a href="${siteUrl}" style="display:inline-block;background-color:#0071e3;color:#ffffff;font-size:15px;font-weight:600;padding:13px 32px;border-radius:980px;text-decoration:none;">LabPaper 바로가기</a>
-  </div>
-  <div style="background-color:#fffbeb;border-radius:12px;padding:16px 20px;margin-bottom:24px;">
-    <p style="font-size:12px;font-weight:600;color:#92400e;margin:0 0 6px;">🧪 이번 주 논문 요약 (밈버전)</p>
-    <p style="font-size:14px;color:#b45309;margin:0;line-height:1.65;">${horoscope.reviewer_luck}</p>
-  </div>
-  <div style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:28px;">${papersHtml}</div>
-  <div style="text-align:center;margin-bottom:36px;">
-    <a href="${siteUrl}" style="display:inline-block;background-color:#1d1d1f;color:#ffffff;font-size:14px;font-weight:600;padding:12px 28px;border-radius:980px;text-decoration:none;">지금 보러가기 →</a>
-  </div>
-  <p style="text-align:center;font-size:12px;color:#c7c7cc;margin:0;">매주 월요일, 우리 분야 핵심 논문을 한눈에</p>
-</div></body></html>`
-}
 
 // ── 메인 ────────────────────────────────────────────────────────────────────
 
@@ -578,13 +508,10 @@ export default async (req: Request) => {
       }
     })
 
-    // ── 7. 밈 요약 + 이메일 제목 병렬 생성 ─────────────────────
+    // ── 7. 밈 요약 생성 ─────────────────────────────────────────
     step = 'generate-horoscope'
-    const [horoscope, emailSubject] = await Promise.all([
-      generateHoroscope(anthropic, newIssueNumber, selectedPapers.map(p => p.title), selectedPapers.map(p => p.abstract || '')),
-      generateSubject(anthropic, newIssueNumber, selectedPapers.map(p => p.title)),
-    ])
-    console.log(`[collect-bg] horoscope done. subject="${emailSubject}"`)
+    const horoscope = await generateHoroscope(anthropic, newIssueNumber, selectedPapers.map(p => p.title), selectedPapers.map(p => p.abstract || ''))
+    console.log(`[collect-bg] horoscope done`)
 
     // ── 8. DB 저장 ──────────────────────────────────────────────
     step = 'insert-issue'
@@ -603,30 +530,7 @@ export default async (req: Request) => {
     // ── 8.5. backfill 완료 대기 ────────────────────────────────
     await backfillPromise.catch((e: unknown) => console.error('[collect-bg] backfill error:', e))
 
-    // ── 9. 이메일 발송 ──────────────────────────────────────────
-    step = 'send-emails'
-    const resendKey = process.env.RESEND_API_KEY
-    if (resendKey) {
-      const resend = new Resend(resendKey)
-      const { data: subscribers } = await supabase
-        .from('subscribers').select('email, name').eq('active', true)
-
-      if (subscribers?.length) {
-        await Promise.all(
-          subscribers.map(sub =>
-            resend.emails.send({
-              from: process.env.RESEND_FROM_EMAIL || 'LabPaper <onboarding@resend.dev>',
-              to: sub.email,
-              replyTo: process.env.RESEND_REPLY_TO || undefined,
-              subject: emailSubject,
-              html: buildEmailHtml(newIssueNumber, processedPapers, horoscope, sub.name || undefined),
-            }).catch(e => console.error(`[collect-bg] email failed to ${sub.email}:`, e))
-          )
-        )
-        console.log(`[collect-bg] emails sent to ${subscribers.length}명`)
-      }
-    }
-
+    // 이메일 발송은 GitHub Actions의 별도 notify 단계가 담당
     console.log(`[collect-bg] ✅ DONE Vol.${newIssueNumber}`)
   } catch (error) {
     console.error(`[collect-bg] ❌ FAILED at step="${step}":`, serializeError(error))
