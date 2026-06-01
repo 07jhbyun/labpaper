@@ -304,12 +304,28 @@ async function fetchAffiliations(doi: string) {
 
 // ── AI (5개씩 배치 처리 — rate limit 방지) ──────────────────────────────────
 
+const AI_MODEL = 'claude-sonnet-4-6'
+
+async function callWithRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (e: any) {
+    if (e?.status === 429 || e?.message?.includes('rate')) {
+      console.warn(`[collect-bg] rate limit hit, retrying in 3s...`)
+      await new Promise(r => setTimeout(r, 3000))
+      return fn()
+    }
+    throw e
+  }
+}
+
 async function batchRun<T>(items: any[], fn: (item: any) => Promise<T>, batchSize = 5): Promise<T[]> {
   const results: T[] = []
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize)
     const batchResults = await Promise.all(batch.map(fn))
     results.push(...batchResults)
+    if (i + batchSize < items.length) await new Promise(r => setTimeout(r, 1000))
   }
   return results
 }
@@ -317,11 +333,11 @@ async function batchRun<T>(items: any[], fn: (item: any) => Promise<T>, batchSiz
 async function generateTitleKo(client: Anthropic, title: string): Promise<string> {
   try {
     const msg = await withTimeout(
-      client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
+      callWithRetry(() => client.messages.create({
+        model: AI_MODEL,
         max_tokens: 100,
         messages: [{ role: 'user', content: `다음 논문 제목을 한국어로 자연스럽게 번역해줘. 번역문만 답해줘.\n${title}` }],
-      }),
+      })),
       30_000, null
     )
     return msg?.content[0].type === 'text' ? msg.content[0].text.trim() : ''
@@ -333,8 +349,8 @@ async function generateTitleKo(client: Anthropic, title: string): Promise<string
 async function generateBullets(client: Anthropic, title: string, abstract: string, journal: string) {
   try {
     const msg = await withTimeout(
-      client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
+      callWithRetry(() => client.messages.create({
+        model: AI_MODEL,
         max_tokens: 300,
         messages: [{
           role: 'user',
@@ -342,7 +358,7 @@ async function generateBullets(client: Anthropic, title: string, abstract: strin
 JSON 배열만: ["bullet1","bullet2","bullet3"]
 제목: ${title}\n저널: ${journal}\n초록: ${abstract.slice(0, 800)}`,
         }],
-      }),
+      })),
       30_000, null
     )
     if (!msg) return ['원문 링크에서 확인해주세요.', '', '']
@@ -360,8 +376,8 @@ async function generateHoroscope(client: Anthropic, issueNumber: number, titles:
       `${i + 1}. ${t}${abstracts[i] ? ` — ${abstracts[i].slice(0, 150)}` : ''}`
     ).join('\n')
     const msg = await withTimeout(
-      client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
+      callWithRetry(() => client.messages.create({
+        model: AI_MODEL,
         max_tokens: 600,
         messages: [{
           role: 'user',
@@ -370,7 +386,7 @@ async function generateHoroscope(client: Anthropic, issueNumber: number, titles:
 JSON만 답해줘:
 {"paper_luck":"전체 분위기 한 줄 밈","experiment_luck":"황당한 실험/결과 개그","citation_luck":"대학원생 공감 포인트","reviewer_luck":"논문 한 줄 평"}`,
         }],
-      }),
+      })),
       45_000, null
     )
     if (!msg) throw new Error('horoscope timeout')

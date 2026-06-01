@@ -2,6 +2,20 @@ import Anthropic from '@anthropic-ai/sdk'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
+const MODEL = 'claude-sonnet-4-6'
+
+async function callWithRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (e: any) {
+    if (e?.status === 429 || e?.message?.includes('rate')) {
+      await new Promise(r => setTimeout(r, 3000))
+      return fn()
+    }
+    throw e
+  }
+}
+
 // 논문 핵심 결과 bullet 3개 생성
 export async function generateSummaryBullets(
   title: string,
@@ -9,20 +23,20 @@ export async function generateSummaryBullets(
   journal: string
 ): Promise<string[]> {
   try {
-    const msg = await client.messages.create({
-      model: 'claude-opus-4-5',
+    const msg = await callWithRetry(() => client.messages.create({
+      model: MODEL,
       max_tokens: 300,
       messages: [{
         role: 'user',
         content: `다음 논문의 핵심 결과를 한국어로 bullet point 3개로 요약해줘.
-각 bullet은 구체적인 수치나 결과를 포함해서 1-2문장으로. 
+각 bullet은 구체적인 수치나 결과를 포함해서 1-2문장으로.
 JSON 배열 형식으로만 답해줘: ["bullet1", "bullet2", "bullet3"]
 
 제목: ${title}
 저널: ${journal}
 초록: ${abstract}`
       }]
-    })
+    }))
 
     const text = msg.content[0].type === 'text' ? msg.content[0].text : ''
     const cleaned = text.replace(/```json|```/g, '').trim()
@@ -40,14 +54,14 @@ JSON 배열 형식으로만 답해줘: ["bullet1", "bullet2", "bullet3"]
 // 논문 제목 한국어 번역
 export async function generateTitleKo(title: string): Promise<string> {
   try {
-    const msg = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+    const msg = await callWithRetry(() => client.messages.create({
+      model: MODEL,
       max_tokens: 100,
       messages: [{
         role: 'user',
         content: `다음 논문 제목을 한국어로 자연스럽게 번역해줘. 번역문만 답해줘.\n${title}`,
       }]
-    })
+    }))
     return msg.content[0].type === 'text' ? msg.content[0].text.trim() : ''
   } catch {
     return ''
@@ -61,8 +75,8 @@ export async function generateEmailSubject(
 ): Promise<string> {
   try {
     const context = paperTitles.slice(0, 5).join(' / ')
-    const msg = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+    const msg = await callWithRetry(() => client.messages.create({
+      model: MODEL,
       max_tokens: 60,
       messages: [{
         role: 'user',
@@ -104,8 +118,8 @@ export async function generateWeeklyHoroscope(
       `${i + 1}. ${t}${paperAbstracts?.[i] ? ` — ${paperAbstracts[i].slice(0, 150)}` : ''}`
     ).join('\n')
 
-    const msg = await client.messages.create({
-      model: 'claude-opus-4-5',
+    const msg = await callWithRetry(() => client.messages.create({
+      model: MODEL,
       max_tokens: 600,
       messages: [{
         role: 'user',
@@ -123,7 +137,7 @@ ${context}
   "reviewer_luck": "이번 주 논문 중 하나를 골라서 '이게 왜 실렸냐'거나 '이건 진짜다' 한 줄 평"
 }`
       }]
-    })
+    }))
 
     const text = msg.content[0].type === 'text' ? msg.content[0].text : ''
     const cleaned = text.replace(/```json|```/g, '').trim()
