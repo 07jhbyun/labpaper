@@ -419,7 +419,9 @@ export default async (req: Request) => {
 
   const auth = req.headers.get('authorization')
   const cronSecret = process.env.CRON_SECRET || process.env.NEXT_PUBLIC_CRON_SECRET
-  if (auth !== `Bearer ${cronSecret}`) {
+  // auth === null → Netlify Scheduled Function 자동 호출 (Authorization 헤더 없음) → 허용
+  // auth가 있으나 토큰이 틀림 → 외부 비인가 요청 → 거부
+  if (auth !== null && auth !== `Bearer ${cronSecret}`) {
     console.error(`[collect-bg] ❌ Unauthorized. received="${auth?.slice(0, 20)}..." expected="Bearer ***"`)
     return
   }
@@ -442,6 +444,32 @@ export default async (req: Request) => {
     }
     const newIssueNumber = (lastIssue?.issue_number || 0) + 1
     console.log(`[collect-bg] ${elapsed()} issueNumber=${newIssueNumber}`)
+
+    // ── 1b. 이번 주 중복 수집 방지 ─────────────────────────────
+    // 이번 주 월요일(UTC) 이후 이미 발행된 이슈가 있으면 스킵
+    step = 'check-this-week'
+    {
+      const now = new Date()
+      const dayOfWeek = now.getUTCDay() // 0=Sun, 1=Mon … 6=Sat
+      const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+      const monday = new Date(now)
+      monday.setUTCDate(now.getUTCDate() - daysSinceMonday)
+      monday.setUTCHours(0, 0, 0, 0)
+      const mondayStr = monday.toISOString().split('T')[0] // 'YYYY-MM-DD'
+
+      const { data: thisWeekIssue } = await supabase
+        .from('issues')
+        .select('issue_number, published_at')
+        .gte('published_at', mondayStr)
+        .limit(1)
+        .maybeSingle()
+
+      if (thisWeekIssue) {
+        console.log(`[collect-bg] ${elapsed()} ⏭ 이번 주 이미 수집됨 Vol.${thisWeekIssue.issue_number} (${thisWeekIssue.published_at}) — 스킵`)
+        return
+      }
+      console.log(`[collect-bg] ${elapsed()} 이번 주 미수집 확인 (기준: ${mondayStr}) — 수집 진행`)
+    }
 
     // ── 2. 기존 논문 + 저자 목록 병렬 조회 ──────────────────────
     step = 'fetch-meta'
@@ -642,14 +670,36 @@ export default async (req: Request) => {
 
     await backfillPromise.catch((e: unknown) => console.error(`[collect-bg] backfill error: ${serializeError(e)}`))
 
+    // ── 9. 이메일 알림 ─────────────────────────────────────────────
+    // Netlify 배포 URL은 process.env.URL로 자동 주입됨
+    const siteUrl = process.env.URL || process.env.NEXT_PUBLIC_SITE_URL || 'https://labpaper.netlify.app'
+    const notifyRes = await withTimeout(
+      fetch(`${siteUrl}/api/notify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${cronSecret}`,
+        },
+        body: JSON.stringify({ issue_number: newIssueNumber }),
+      }),
+      60_000, null
+    )
+    if (notifyRes?.ok) {
+      console.log(`[collect-bg] ${elapsed()} ✉️ notify sent ✓`)
+    } else {
+      console.warn(`[collect-bg] ${elapsed()} ⚠️ notify failed: HTTP ${notifyRes?.status}`)
+    }
+
     console.log(`[collect-bg] ${elapsed()} ✅ DONE Vol.${newIssueNumber}`)
   } catch (error) {
     console.error(`[collect-bg] ${elapsed()} ❌ FAILED at step="${step}": ${serializeError(error)}`)
   }
 }
 
-// 파일명 '-background' 접미사가 Netlify 백그라운드 함수(15분 타임아웃)를 지정
-// 엔드포인트: /.netlify/functions/collect-background
+// '-background' 접미사 → Netlify 백그라운드 함수 (15분 타임아웃)
+// schedule → Netlify Scheduled Function (플랫폼이 직접 크론 실행, GitHub Actions 불필요)
+// 엔드포인트: /.netlify/functions/collect-background  또는  /api/papers/collect
 export const config: Config = {
   path: '/api/papers/collect',
+  schedule: '0 1 * * 1',  // 매주 월요일 01:00 UTC = 10:00 KST (GitHub Actions 혼잡 자정 회피)
 }

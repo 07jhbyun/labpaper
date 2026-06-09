@@ -1,9 +1,7 @@
-name: Weekly Paper Collection
+name: Weekly Paper Collection (Manual)
 
 on:
-  schedule:
-    - cron: '0 0 * * 1'  # 매주 월요일 00:00 UTC = 09:00 KST
-  workflow_dispatch:       # 수동 트리거 허용
+  workflow_dispatch:  # 수동 트리거 전용 (크론은 Netlify Scheduled Function이 담당)
 
 jobs:
   collect:
@@ -23,36 +21,10 @@ jobs:
           cat /tmp/response.txt
 
           # Background function은 항상 202를 즉시 반환 (비동기 실행, 최대 15분)
+          # 이메일 알림은 collect 함수 내부에서 자동 발송됨
           if [ "$response" != "202" ]; then
             echo "Unexpected status: $response"
             exit 1
           fi
 
-          echo "Collection triggered. Background function is running (up to 15 min)."
-
-  notify:
-    needs: collect
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-
-    steps:
-      - name: Wait for background function to complete
-        run: sleep 900  # 15분 대기 (백그라운드 함수 최대 실행 시간)
-
-      - name: Send newsletter emails via notify API
-        run: |
-          response=$(curl -s -o /tmp/notify_response.txt -w "%{http_code}" \
-            -X POST "https://labpaper.netlify.app/api/notify" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
-
-          echo "HTTP status: $response"
-          echo "Response body:"
-          cat /tmp/notify_response.txt
-
-          if [ "$response" != "200" ]; then
-            echo "Notify failed with status $response"
-            exit 1
-          fi
-
-          echo "Emails sent successfully."
+          echo "Collection triggered. Background function running (up to 15 min) — email will be sent automatically."

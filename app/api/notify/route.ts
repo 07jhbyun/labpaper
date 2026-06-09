@@ -23,19 +23,30 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 중복 발송 방지 ──────────────────────────────────────────
-    const { data: existingLog } = await supabaseAdmin
+    // INSERT ON CONFLICT DO NOTHING으로 원자적 잠금: 최초 호출만 행을 만들고 진행.
+    // 이미 행이 있으면 insert가 0행을 반환 → 다른 프로세스가 이미 처리 중/완료.
+    const { data: lockRows } = await supabaseAdmin
       .from('email_logs')
-      .select('id, sent_at')
-      .eq('issue_number', issue.issue_number)
-      .single()
+      .upsert(
+        { issue_number: issue.issue_number, recipients: 0 },
+        { onConflict: 'issue_number', ignoreDuplicates: true }
+      )
+      .select('id')
 
-    if (existingLog) {
+    // ignoreDuplicates: true 이면 기존 행이 있을 때 data = [] (빈 배열)
+    if (!lockRows || lockRows.length === 0) {
+      const { data: existingLog } = await supabaseAdmin
+        .from('email_logs')
+        .select('sent_at, recipients')
+        .eq('issue_number', issue.issue_number)
+        .single()
       return NextResponse.json({
         success: true,
         sent: 0,
-        message: `Vol.${issue.issue_number} 이미 발송됨 (${existingLog.sent_at}) — 중복 방지`,
+        message: `Vol.${issue.issue_number} 이미 발송됨 (${existingLog?.sent_at}, ${existingLog?.recipients}명) — 중복 방지`,
       })
     }
+    // 잠금 획득 성공 → 이 프로세스가 발송을 담당
 
     // 해당 이슈 논문 조회
     const { data: papers } = await supabaseAdmin
@@ -87,15 +98,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── 발송 기록 저장 (중복 방지용) ───────────────────────────
-    if (sent > 0) {
-      await supabaseAdmin
-        .from('email_logs')
-        .insert({ issue_number: issue.issue_number, recipients: sent })
-        .then(({ error }) => {
-          if (error) console.error('email_logs insert error:', error.message)
-        })
-    }
+    // ── 발송 결과로 email_logs 업데이트 ────────────────────────
+    // upsert로 잠금 시 recipients=0으로 행을 만들었으므로 실제 발송 수로 갱신
+    const { error: updateErr } = await supabaseAdmin
+      .from('email_logs')
+      .update({ recipients: sent })
+      .eq('issue_number', issue.issue_number)
+    if (updateErr) console.error('email_logs update error:', updateErr.message)
 
     return NextResponse.json({ success: true, sent, errors: errors.length ? errors : undefined })
   } catch (error) {
