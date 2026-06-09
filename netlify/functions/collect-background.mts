@@ -697,9 +697,7 @@ export default async (req: Request) => {
 }
 
 // '-background' 접미사 → Netlify 백그라운드 함수 (15분 타임아웃)
-// schedule → Netlify Scheduled Function (플랫폼이 직접 크론 실행, GitHub Actions 불필요)
-// 엔드포인트: /.netlify/functions/collect-background  또는  /api/papers/collect
-export const config: Config = {
-  path: '/api/papers/collect',
-  schedule: '0 1 * * 1',  // 매주 월요일 01:00 UTC = 10:00 KST (GitHub Actions 혼잡 자정 회피)
-}
+// schedule은 netlify.toml [functions."collect-background"] 블록에서 설정
+// (Netlify 제약: 스케줄 함수는 custom path 불가 → 기본 엔드포인트만 사용)
+// 엔드포인트: /.netlify/functions/collect-background
+export const config: Config = {}

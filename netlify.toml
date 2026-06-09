@@ -7,3 +7,9 @@
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
+
+[functions]
+  directory = "netlify/functions"
+
+[functions."collect-background"]
+  schedule = "0 1 * * 1"

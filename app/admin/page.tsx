@@ -215,7 +215,7 @@ export default function AdminPage() {
     setCollecting(true)
     setCollectResult('')
     try {
-      const res = await fetch('/api/papers/collect', {
+      const res = await fetch('/.netlify/functions/collect-background', {
         method: 'POST',
         headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}` },
       })
