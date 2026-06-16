@@ -1,7 +1,9 @@
-name: Weekly Paper Collection (Manual)
+name: Weekly Paper Collection
 
 on:
-  workflow_dispatch:  # 수동 트리거 전용 (크론은 Netlify Scheduled Function이 담당)
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
 
 jobs:
   collect:
