@@ -697,7 +697,8 @@ export default async (req: Request) => {
 }
 
 // '-background' 접미사 → Netlify 백그라운드 함수 (15분 타임아웃)
-// schedule은 netlify.toml [functions."collect-background"] 블록에서 설정
-// (Netlify 제약: 스케줄 함수는 custom path 불가 → 기본 엔드포인트만 사용)
+// 주간 트리거는 GitHub Actions(.github/workflows/weekly-collect.yml)가 담당.
+// 이 함수는 HTTP POST로만 호출됨 (Netlify schedule 미사용 — background 함수는
+// scheduled 함수와 동시 등록 불가하여 제거).
 // 엔드포인트: /.netlify/functions/collect-background
 export const config: Config = {}

@@ -2,7 +2,9 @@ name: Weekly Paper Collection
 
 on:
   schedule:
-    - cron: '0 0 * * 1'
+    # 00:17 UTC = 09:17 KST 월요일. 정각(00:00)은 GitHub Actions 혼잡으로
+    # 스케줄이 지연·스킵되는 일이 잦아 분 오프셋을 둠.
+    - cron: '17 0 * * 1'
   workflow_dispatch:
 
 jobs:
