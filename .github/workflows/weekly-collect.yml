@@ -25,10 +25,49 @@ jobs:
           cat /tmp/response.txt
 
           # Background function은 항상 202를 즉시 반환 (비동기 실행, 최대 15분)
-          # 이메일 알림은 collect 함수 내부에서 자동 발송됨
           if [ "$response" != "202" ]; then
             echo "Unexpected status: $response"
             exit 1
           fi
 
-          echo "Collection triggered. Background function running (up to 15 min) — email will be sent automatically."
+          echo "Collection triggered. Background function running (up to 15 min)."
+
+  # 이메일 발송은 별도 job으로 분리(decouple). background 함수가 15분 타임아웃에
+  # 걸려 내부 notify 호출 전에 죽더라도, 이 job이 수집 완료 후 /api/notify를
+  # 다시 호출해 메일을 발송한다. /api/notify는 email_logs 잠금으로 멱등이라
+  # background 내부 notify와 겹쳐도 한 번만 발송된다(중복 시 "already sent").
+  notify:
+    needs: collect
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Wait for background collection to complete
+        run: sleep 900  # 15분 대기 (백그라운드 함수 최대 실행 시간)
+
+      - name: Send newsletter emails via notify API (with retry)
+        run: |
+          # 최신 이슈 대상으로 발송 (body 없으면 /api/notify가 최신 호 선택).
+          # 일시적 실패에 대비해 최대 5회(30초 간격) 재시도.
+          for attempt in 1 2 3 4 5; do
+            response=$(curl -s -o /tmp/notify_response.txt -w "%{http_code}" \
+              -X POST "https://labpaper.netlify.app/api/notify" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+
+            echo "Attempt $attempt — HTTP status: $response"
+            echo "Response body:"
+            cat /tmp/notify_response.txt
+            echo ""
+
+            if [ "$response" = "200" ]; then
+              echo "Emails sent (or already sent) successfully."
+              exit 0
+            fi
+
+            echo "Notify attempt $attempt failed (status $response). Retrying in 30s..."
+            sleep 30
+          done
+
+          echo "Notify failed after 5 attempts."
+          exit 1
