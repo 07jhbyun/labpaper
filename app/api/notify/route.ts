@@ -25,13 +25,26 @@ export async function POST(req: NextRequest) {
     // ── 중복 발송 방지 ──────────────────────────────────────────
     // INSERT ON CONFLICT DO NOTHING으로 원자적 잠금: 최초 호출만 행을 만들고 진행.
     // 이미 행이 있으면 insert가 0행을 반환 → 다른 프로세스가 이미 처리 중/완료.
-    const { data: lockRows } = await supabaseAdmin
+    const { data: lockRows, error: lockError } = await supabaseAdmin
       .from('email_logs')
       .upsert(
         { issue_number: issue.issue_number, recipients: 0 },
         { onConflict: 'issue_number', ignoreDuplicates: true }
       )
-      .select('id')
+      // email_logs 테이블엔 id 컬럼이 없다 → 존재하는 issue_number를 반환받는다.
+      // (과거 .select('id')는 42703 에러를 내고 삼켜져 발송이 통째로 막혔다)
+      .select('issue_number')
+
+    // 잠금 INSERT 자체가 실패했으면 절대 '이미 발송됨'으로 조용히 넘기면 안 된다.
+    // (예: service_role 권한이 아니라 RLS에 막히는 경우) — 명확히 에러를 드러낸다.
+    if (lockError) {
+      console.error('email_logs lock upsert error:', lockError)
+      return NextResponse.json({
+        error: 'lock_failed',
+        detail: lockError.message,
+        code: lockError.code,
+      }, { status: 500 })
+    }
 
     // ignoreDuplicates: true 이면 기존 행이 있을 때 data = [] (빈 배열)
     if (!lockRows || lockRows.length === 0) {
@@ -40,10 +53,19 @@ export async function POST(req: NextRequest) {
         .select('sent_at, recipients')
         .eq('issue_number', issue.issue_number)
         .single()
+      // 기존 행이 실제로 있을 때만 '이미 발송됨'. 행도 없고 에러도 없는데
+      // 잠금이 비어있다면 insert가 무력화된 비정상 상태이므로 드러낸다.
+      if (!existingLog) {
+        console.error(`notify lock empty with no existing row for issue ${issue.issue_number}`)
+        return NextResponse.json({
+          error: 'lock_empty_no_row',
+          detail: 'upsert가 행을 만들지 못했고 기존 행도 없음 (service_role 권한/RLS 의심)',
+        }, { status: 500 })
+      }
       return NextResponse.json({
         success: true,
         sent: 0,
-        message: `Vol.${issue.issue_number} 이미 발송됨 (${existingLog?.sent_at}, ${existingLog?.recipients}명) — 중복 방지`,
+        message: `Vol.${issue.issue_number} 이미 발송됨 (${existingLog.sent_at}, ${existingLog.recipients}명) — 중복 방지`,
       })
     }
     // 잠금 획득 성공 → 이 프로세스가 발송을 담당
