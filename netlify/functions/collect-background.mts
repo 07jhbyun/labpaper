@@ -68,6 +68,16 @@ function elapsed() {
   return `+${Math.round((Date.now() - _startTime) / 1000)}s`
 }
 
+// 저널별 수집 결과 집계 — 실패(429/timeout)와 "정말 0편"을 구분하기 위해 기록한다.
+type JournalStat = {
+  name: string
+  fetched: number
+  total: number
+  outcome: 'ok' | 'timeout' | 'http-error' | 'exception'
+  detail?: string
+}
+let _journalStats: JournalStat[] = []
+
 // Promise에 timeout을 걸어 초과 시 null/기본값을 반환 (throw 하지 않음)
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   return Promise.race([
@@ -114,7 +124,7 @@ async function fetchByJournal(journalName: string, issn: string) {
     const from = new Date()
     from.setDate(from.getDate() - 14)
     const fromStr = from.toISOString().split('T')[0]
-    const url = `${CROSSREF_API}?filter=issn:${issn},from-pub-date:${fromStr}&sort=published&order=desc&rows=10&select=title,author,published,DOI,abstract,container-title`
+    const url = `${CROSSREF_API}?filter=issn:${issn},from-pub-date:${fromStr}&sort=published&order=desc&rows=100&select=title,author,published,DOI,abstract,container-title`
     const res = await withTimeout(
       fetch(url, { headers: { 'User-Agent': 'LabPaper/1.0 (mailto:07jhbyun@gmail.com)' } }),
       10_000,
@@ -122,15 +132,22 @@ async function fetchByJournal(journalName: string, issn: string) {
     )
     if (!res) {
       console.warn(`[collect-bg] fetchByJournal TIMEOUT: ${journalName}`)
+      _journalStats.push({ name: journalName, fetched: 0, total: 0, outcome: 'timeout' })
       return []
     }
     if (!res.ok) {
-      console.warn(`[collect-bg] fetchByJournal HTTP ${res.status}: ${journalName}`)
+      console.warn(`[collect-bg] ❌ Crossref HTTP ${res.status}: ${journalName}`)
+      _journalStats.push({ name: journalName, fetched: 0, total: 0, outcome: 'http-error', detail: String(res.status) })
       return []
     }
     const data = await res.json()
     const items = data.message?.items || []
-    console.log(`[collect-bg]   journal "${journalName}" → ${items.length}편`)
+    // total: Crossref가 보유한 전체 건수. items.length가 rows 상한(10)에 걸리면
+    // total과의 격차가 그대로 "못 본 논문 수"다.
+    const total = data.message?.['total-results'] ?? 0
+    const truncated = total > items.length ? ` ⚠truncated(${total - items.length}편 미조회)` : ''
+    console.log(`[collect-bg]   journal "${journalName}" → ${items.length}편 / total=${total}${truncated}`)
+    _journalStats.push({ name: journalName, fetched: items.length, total, outcome: 'ok' })
     return items.map((item: any) => ({
       title: stripHtml(Array.isArray(item.title) ? item.title[0] : item.title || ''),
       authors: item.author?.map((a: any) => `${a.given || ''} ${a.family || ''}`.trim()).join(', ') || '',
@@ -142,6 +159,7 @@ async function fetchByJournal(journalName: string, issn: string) {
     }))
   } catch (e) {
     console.warn(`[collect-bg] fetchByJournal ERROR "${journalName}": ${serializeError(e)}`)
+    _journalStats.push({ name: journalName, fetched: 0, total: 0, outcome: 'exception', detail: serializeError(e).slice(0, 120) })
     return []
   }
 }
@@ -160,13 +178,22 @@ async function fetchByAuthor(authorName: string) {
       console.warn(`[collect-bg] fetchByAuthor TIMEOUT (search): ${authorName}`)
       return []
     }
+    if (!searchRes.ok) {
+      const body = await searchRes.text().catch(() => '')
+      console.warn(`[collect-bg] ❌ S2 author/search HTTP ${searchRes.status} "${authorName}": ${body.slice(0, 200)}`)
+      return []
+    }
     const data = await searchRes.json()
-    if (!data.data?.length) return []
+    if (!data.data?.length) {
+      console.warn(`[collect-bg]   author "${authorName}" → S2 검색 결과 없음 (이름 표기 불일치 의심)`)
+      return []
+    }
     const authorId = data.data[0].authorId
 
     const papersRes = await withTimeout(
       fetch(
-        `${SEMANTIC_SCHOLAR_API}/author/${authorId}/papers?fields=title,authors,year,journal,externalIds,abstract,tldr&limit=5&sort=publicationDate`,
+        // tldr는 이 엔드포인트에서 지원되지 않음 (요청 시 HTTP 400) — 넣지 말 것
+        `${SEMANTIC_SCHOLAR_API}/author/${authorId}/papers?fields=title,authors,year,journal,externalIds,abstract&limit=5&sort=publicationDate`,
         { headers: { 'User-Agent': 'LabPaper/1.0' } }
       ),
       8_000,
@@ -176,16 +203,29 @@ async function fetchByAuthor(authorName: string) {
       console.warn(`[collect-bg] fetchByAuthor TIMEOUT (papers): ${authorName}`)
       return []
     }
+    if (!papersRes.ok) {
+      const body = await papersRes.text().catch(() => '')
+      console.warn(`[collect-bg] ❌ S2 author/${authorId}/papers HTTP ${papersRes.status} "${authorName}": ${body.slice(0, 200)}`)
+      return []
+    }
     const papersData = await papersRes.json()
-    return (papersData.data || [])
-      .filter((p: any) => p.year >= new Date().getFullYear())
+    const fetched = papersData.data || []
+    // 작년치까지 허용 — 올해만 보면 연초에 저자 논문이 전부 걸러진다
+    const minYear = new Date().getFullYear() - 1
+    const yearPassed = fetched.filter((p: any) => p.year >= minYear)
+    console.log(
+      `[collect-bg]   author "${authorName}" (S2 id=${authorId}, matched="${data.data[0].name}") → ` +
+      `${fetched.length}편 조회 → ${yearPassed.length}편 (year>=${minYear})` +
+      (fetched.length > 0 && yearPassed.length === 0 ? ` ⚠연도필터로 전멸` : '')
+    )
+    return yearPassed
       .map((p: any) => ({
         title: stripHtml(p.title || ''),
         authors: p.authors?.map((a: any) => a.name).join(', ') || authorName,
         journal: p.journal?.name || 'Unknown',
         year: p.year,
         doi: p.externalIds?.DOI,
-        abstract: stripHtml(p.abstract || p.tldr?.text || ''),
+        abstract: stripHtml(p.abstract || ''),
         source: 'auto',
       }))
   } catch (e) {
@@ -406,6 +446,7 @@ JSON만 답해줘:
 
 export default async (req: Request) => {
   _startTime = Date.now()
+  _journalStats = [] // 워밍된 컨테이너 재사용 시 이전 실행 집계가 남지 않도록 초기화
   console.log(`[collect-bg] ▶ START ${new Date().toISOString()}`)
 
   // 환경변수 존재 여부 확인
@@ -503,22 +544,60 @@ export default async (req: Request) => {
       authorResults.push(...res)
       if (authorBatches.indexOf(batch) < authorBatches.length - 1) await new Promise(r => setTimeout(r, 300))
     }
-    console.log(`[collect-bg] ${elapsed()} authors done → ${authorResults.flat().length}편`)
+    const authorPaperCount = authorResults.flat().length
+    const authorsWithZero = authorResults.filter(r => r.length === 0).length
+    console.log(
+      `[collect-bg] ${elapsed()} authors done → ${authorPaperCount}편 ` +
+      `(저자 ${authorList.length}명 중 ${authorsWithZero}명이 0편)`
+    )
+    if (authorList.length > 0 && authorPaperCount === 0) {
+      console.warn(`[collect-bg] ⚠ 저자 수집 전멸 — 저자 ${authorList.length}명 전원 0편. S2 API 에러/연도필터 로그 확인 필요`)
+    }
 
     console.log(`[collect-bg] ${elapsed()} collecting journals (${Object.keys(JOURNAL_ISSN_MAP).length}개)...`)
     const journalEntries = Object.entries(JOURNAL_ISSN_MAP)
     const journalBatches: typeof journalEntries[] = []
-    for (let i = 0; i < journalEntries.length; i += 8) journalBatches.push(journalEntries.slice(i, i + 8))
+    // Crossref rate limit 회피: 동시 3개 + 배치 간 1.5초 (8개/0.5초는 429 유발)
+    for (let i = 0; i < journalEntries.length; i += 3) journalBatches.push(journalEntries.slice(i, i + 3))
     const journalResults: any[][] = []
     for (const batch of journalBatches) {
       const res = await Promise.all(batch.map(([name, issn]) => fetchByJournal(name, issn)))
       journalResults.push(...res)
-      if (journalBatches.indexOf(batch) < journalBatches.length - 1) await new Promise(r => setTimeout(r, 500))
+      if (journalBatches.indexOf(batch) < journalBatches.length - 1) await new Promise(r => setTimeout(r, 1500))
     }
-    console.log(`[collect-bg] ${elapsed()} journals done → ${journalResults.flat().length}편`)
+    const journalPaperCount = journalResults.flat().length
+    console.log(`[collect-bg] ${elapsed()} journals done → ${journalPaperCount}편`)
+
+    // 저널 수집 요약: 실패한 저널과 rows 상한에 잘린 저널을 명시적으로 드러낸다.
+    {
+      const failed = _journalStats.filter(s => s.outcome !== 'ok')
+      const truncated = _journalStats.filter(s => s.outcome === 'ok' && s.total > s.fetched)
+      const missedTotal = truncated.reduce((sum, s) => sum + (s.total - s.fetched), 0)
+      console.log(
+        `[collect-bg] ${elapsed()} 저널 요약: ${_journalStats.length}개 시도 / ` +
+        `성공 ${_journalStats.length - failed.length} / 실패 ${failed.length} / rows상한에 잘린 저널 ${truncated.length}`
+      )
+      if (failed.length > 0) {
+        const byOutcome: Record<string, string[]> = {}
+        for (const s of failed) {
+          const key = s.detail ? `${s.outcome}(${s.detail})` : s.outcome
+          ;(byOutcome[key] ||= []).push(s.name)
+        }
+        for (const [key, names] of Object.entries(byOutcome)) {
+          console.warn(`[collect-bg] ⚠ 저널 수집 실패 [${key}] ${names.length}개: ${names.join(', ')}`)
+        }
+      }
+      if (missedTotal > 0) {
+        console.warn(
+          `[collect-bg] ⚠ rows 상한으로 총 ${missedTotal}편 미조회. ` +
+          `상위 5개: ${truncated.sort((a, b) => (b.total - b.fetched) - (a.total - a.fetched)).slice(0, 5)
+            .map(s => `${s.name}(${s.fetched}/${s.total})`).join(', ')}`
+        )
+      }
+    }
 
     const allRawPapers = [...authorResults.flat(), ...journalResults.flat()]
-    console.log(`[collect-bg] ${elapsed()} raw=${allRawPapers.length}`)
+    console.log(`[collect-bg] ${elapsed()} raw=${allRawPapers.length} (저자 ${authorPaperCount} + 저널 ${journalPaperCount})`)
 
     // ── 4. 중복 제거 ─────────────────────────────────────────────
     step = 'deduplicate'
@@ -536,9 +615,27 @@ export default async (req: Request) => {
 
     // ── 4.5. 신규 논문 abstract 보완 ────────────────────────────
     step = 'fill-abstracts'
-    const missingAbstractPapers = uniquePapers.filter((p: any) => !p.abstract && p.doi)
+    // rows=100 이후 abstract 없는 논문이 수백 건이 된다. 전체를 Promise.all로 한 번에
+    // 던지면 S2/Crossref/OpenAlex 3곳에 수천 건이 동시에 나가 rate limit에 걸린다.
+    // → IF 높은 저널(어차피 selectedPapers로 뽑힐 후보) 우선, 상한 + 동시 8건으로 제한.
+    const ABSTRACT_FILL_LIMIT = 300
+    const ABSTRACT_FILL_CONCURRENCY = 8
+    const missingAll = uniquePapers
+      .filter((p: any) => !p.abstract && p.doi)
+      .sort((a: any, b: any) => (JOURNAL_IF_MAP[b.journal] || 0) - (JOURNAL_IF_MAP[a.journal] || 0))
+    const missingAbstractPapers = missingAll.slice(0, ABSTRACT_FILL_LIMIT)
+    if (missingAll.length > ABSTRACT_FILL_LIMIT) {
+      console.warn(
+        `[collect-bg] ⚠ abstract 보완 상한 적용: ${missingAll.length}편 중 상위 ${ABSTRACT_FILL_LIMIT}편만 조회 ` +
+        `(${missingAll.length - ABSTRACT_FILL_LIMIT}편은 abstract 없이 키워드 필터 통과 — 제목으로만 매칭됨)`
+      )
+    }
     if (missingAbstractPapers.length > 0) {
-      const filled = await Promise.all(missingAbstractPapers.map((p: any) => fetchAbstract(p.doi)))
+      const filled: (string | null)[] = []
+      for (let i = 0; i < missingAbstractPapers.length; i += ABSTRACT_FILL_CONCURRENCY) {
+        const chunk = missingAbstractPapers.slice(i, i + ABSTRACT_FILL_CONCURRENCY)
+        filled.push(...await Promise.all(chunk.map((p: any) => fetchAbstract(p.doi))))
+      }
       missingAbstractPapers.forEach((p: any, i: number) => { if (filled[i]) p.abstract = filled[i] })
       console.log(`[collect-bg] ${elapsed()} abstract fill: ${filled.filter(Boolean).length}/${missingAbstractPapers.length}`)
     }
@@ -556,7 +653,15 @@ export default async (req: Request) => {
       .sort((a, b) => (JOURNAL_IF_MAP[b.journal] || 0) - (JOURNAL_IF_MAP[a.journal] || 0))
       .slice(0, 15)
 
-    console.log(`[collect-bg] ${elapsed()} filter: unique=${uniquePapers.length} → keyword=${keywordPassed.length} → non-review=${reviewFiltered.length} → selected=${selectedPapers.length}`)
+    // 단계별 유실량을 한 줄로 — 어느 필터가 논문을 잡아먹었는지 바로 보이게
+    console.log(
+      `[collect-bg] ${elapsed()} 📊 FUNNEL: ` +
+      `raw=${allRawPapers.length} → unique=${uniquePapers.length} (중복 -${allRawPapers.length - uniquePapers.length}) → ` +
+      `keyword=${keywordPassed.length} (-${uniquePapers.length - keywordPassed.length}) → ` +
+      `non-review=${reviewFiltered.length} (-${keywordPassed.length - reviewFiltered.length}) → ` +
+      `selected=${selectedPapers.length} (상한 15편, -${reviewFiltered.length - selectedPapers.length})`
+    )
+    console.log(`[collect-bg] ${elapsed()} 키워드 사전: 내장 ${KEYWORDS.length}개 + DB ${extraKeywords.length}개`)
 
     // 필터 통과 논문이 0개면 원인 진단 로그
     if (uniquePapers.length > 0 && keywordPassed.length === 0) {
@@ -564,6 +669,37 @@ export default async (req: Request) => {
       uniquePapers.slice(0, 5).forEach((p, i) =>
         console.warn(`[collect-bg]   [${i}] "${p.title}" (abstract length=${p.abstract?.length ?? 0})`)
       )
+    }
+
+    // 수집량이 비정상적으로 적으면 원인 후보를 함께 출력한다.
+    const LOW_YIELD_THRESHOLD = 5
+    if (selectedPapers.length < LOW_YIELD_THRESHOLD) {
+      const failedJournals = _journalStats.filter(s => s.outcome !== 'ok')
+      const missedTotal = _journalStats
+        .filter(s => s.outcome === 'ok' && s.total > s.fetched)
+        .reduce((sum, s) => sum + (s.total - s.fetched), 0)
+
+      console.warn(`[collect-bg] 🚨 LOW YIELD: Vol.${newIssueNumber} 최종 ${selectedPapers.length}편 (기준 ${LOW_YIELD_THRESHOLD}편 미만)`)
+      console.warn(`[collect-bg] 🚨   원인 후보:`)
+      if (authorPaperCount === 0)
+        console.warn(`[collect-bg] 🚨   - 저자 수집 0편 (저자 ${authorList.length}명) → S2 API 응답 로그 확인`)
+      if (failedJournals.length > 0)
+        console.warn(`[collect-bg] 🚨   - 저널 ${failedJournals.length}/${_journalStats.length}개 수집 실패 (Crossref rate limit 의심)`)
+      if (missedTotal > 0)
+        console.warn(`[collect-bg] 🚨   - rows 상한으로 ${missedTotal}편 미조회 (고발행량 저널이 잘림)`)
+      if (uniquePapers.length > 0)
+        console.warn(`[collect-bg] 🚨   - 키워드 필터 통과율 ${keywordPassed.length}/${uniquePapers.length} (${Math.round(keywordPassed.length / uniquePapers.length * 100)}%)`)
+      if (allRawPapers.length > 0 && uniquePapers.length / allRawPapers.length < 0.5)
+        console.warn(`[collect-bg] 🚨   - 중복 제거율 ${Math.round((1 - uniquePapers.length / allRawPapers.length) * 100)}% (기존 DB와 과다 중복)`)
+
+      // 탈락한 논문 샘플 — 키워드 사전이 실제 논문과 안 맞는지 눈으로 확인용
+      const rejected = uniquePapers.filter(p => !keywordPassed.includes(p))
+      if (rejected.length > 0) {
+        console.warn(`[collect-bg] 🚨   키워드 탈락 샘플 (${rejected.length}편 중 5편):`)
+        rejected.slice(0, 5).forEach((p, i) =>
+          console.warn(`[collect-bg] 🚨     [${i}] "${(p.title || '').slice(0, 80)}" (${p.journal}, abstract=${p.abstract?.length ?? 0}자)`)
+        )
+      }
     }
 
     if (selectedPapers.length === 0) {
@@ -666,7 +802,11 @@ export default async (req: Request) => {
     const { error: papersError } = await supabase.from('papers').insert(processedPapers)
     if (papersError) throw new Error(`papers insert 실패: ${papersError.message} (code: ${papersError.code})`)
 
-    console.log(`[collect-bg] ${elapsed()} DB saved ✓ Vol.${newIssueNumber} ${processedPapers.length}편`)
+    console.log(
+      `[collect-bg] ${elapsed()} DB saved ✓ Vol.${newIssueNumber} — ` +
+      `papers=${processedPapers.length}편, all_papers=${keywordPassed.length}편 ` +
+      `(raw ${allRawPapers.length} → 최종 ${processedPapers.length}, 통과율 ${allRawPapers.length ? (processedPapers.length / allRawPapers.length * 100).toFixed(1) : 0}%)`
+    )
 
     await backfillPromise.catch((e: unknown) => console.error(`[collect-bg] backfill error: ${serializeError(e)}`))
 
