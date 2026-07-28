@@ -164,31 +164,49 @@ async function fetchByJournal(journalName: string, issn: string) {
   }
 }
 
-async function fetchByAuthor(authorName: string) {
+async function fetchByAuthor(authorName: string, savedId?: string | null) {
   try {
-    const searchRes = await withTimeout(
-      fetch(
-        `${SEMANTIC_SCHOLAR_API}/author/search?query=${encodeURIComponent(authorName)}&fields=authorId,name`,
-        { headers: { 'User-Agent': 'LabPaper/1.0' } }
-      ),
-      8_000,
-      null
-    )
-    if (!searchRes) {
-      console.warn(`[collect-bg] fetchByAuthor TIMEOUT (search): ${authorName}`)
-      return []
+    // semantic_scholar_id가 저장돼 있으면 이름 검색을 건너뛴다.
+    // 이름 검색은 결과 중 첫 번째를 그대로 쓰기 때문에, 동명이인이나
+    // 이니셜 표기 차이("C. Yavuz" vs "Cafer T. Yavuz")로 엉뚱한 저자가 잡힐 수 있다.
+    let authorId: string
+    let resolvedName: string
+
+    if (savedId) {
+      authorId = savedId
+      resolvedName = 'saved-id'
+    } else {
+      const searchRes = await withTimeout(
+        fetch(
+          `${SEMANTIC_SCHOLAR_API}/author/search?query=${encodeURIComponent(authorName)}&fields=authorId,name`,
+          { headers: { 'User-Agent': 'LabPaper/1.0' } }
+        ),
+        8_000,
+        null
+      )
+      if (!searchRes) {
+        console.warn(`[collect-bg] fetchByAuthor TIMEOUT (search): ${authorName}`)
+        return []
+      }
+      if (!searchRes.ok) {
+        const body = await searchRes.text().catch(() => '')
+        console.warn(`[collect-bg] ❌ S2 author/search HTTP ${searchRes.status} "${authorName}": ${body.slice(0, 200)}`)
+        return []
+      }
+      const data = await searchRes.json()
+      if (!data.data?.length) {
+        console.warn(`[collect-bg]   author "${authorName}" → S2 검색 결과 없음 (이름 표기 불일치 의심)`)
+        return []
+      }
+      authorId = data.data[0].authorId
+      resolvedName = data.data[0].name
+      if (data.data.length > 1) {
+        console.warn(
+          `[collect-bg]   ⚠ author "${authorName}" → 검색 결과 ${data.data.length}건 중 첫 번째 사용 ` +
+          `(id=${authorId}, "${resolvedName}"). 엉뚱한 저자일 수 있음 — admin에서 semantic_scholar_id 지정 권장`
+        )
+      }
     }
-    if (!searchRes.ok) {
-      const body = await searchRes.text().catch(() => '')
-      console.warn(`[collect-bg] ❌ S2 author/search HTTP ${searchRes.status} "${authorName}": ${body.slice(0, 200)}`)
-      return []
-    }
-    const data = await searchRes.json()
-    if (!data.data?.length) {
-      console.warn(`[collect-bg]   author "${authorName}" → S2 검색 결과 없음 (이름 표기 불일치 의심)`)
-      return []
-    }
-    const authorId = data.data[0].authorId
 
     const papersRes = await withTimeout(
       fetch(
@@ -214,7 +232,7 @@ async function fetchByAuthor(authorName: string) {
     const minYear = new Date().getFullYear() - 1
     const yearPassed = fetched.filter((p: any) => p.year >= minYear)
     console.log(
-      `[collect-bg]   author "${authorName}" (S2 id=${authorId}, matched="${data.data[0].name}") → ` +
+      `[collect-bg]   author "${authorName}" (S2 id=${authorId}, ${resolvedName}) → ` +
       `${fetched.length}편 조회 → ${yearPassed.length}편 (year>=${minYear})` +
       (fetched.length > 0 && yearPassed.length === 0 ? ` ⚠연도필터로 전멸` : '')
     )
@@ -515,14 +533,18 @@ export default async (req: Request) => {
     // ── 2. 기존 논문 + 저자 목록 병렬 조회 ──────────────────────
     step = 'fetch-meta'
     const [{ data: authors, error: authorsErr }, { data: existingPapers }, { data: noAbstractPapers }] = await Promise.all([
-      supabase.from('followed_authors').select('name').in('status', ['active', 'auto_added']),
+      supabase.from('followed_authors').select('name, semantic_scholar_id').in('status', ['active', 'auto_added']),
       supabase.from('papers').select('doi, title'),
       supabase.from('papers').select('id, doi').is('abstract', null).not('doi', 'is', null).limit(25),
     ])
     if (authorsErr) console.warn(`[collect-bg] followed_authors query error: ${authorsErr.message}`)
     const existingDois = new Set<string>((existingPapers || []).map(p => p.doi).filter(Boolean))
     const existingTitles = new Set<string>((existingPapers || []).map(p => normalizeTitle(p.title)))
-    console.log(`[collect-bg] ${elapsed()} authors=${authors?.length ?? 0} existingDois=${existingDois.size} noAbstract=${noAbstractPapers?.length ?? 0}`)
+    const withIdCount = (authors || []).filter((a: any) => a.semantic_scholar_id).length
+    console.log(
+      `[collect-bg] ${elapsed()} authors=${authors?.length ?? 0} (S2 ID 지정 ${withIdCount}명, 이름검색 ${(authors?.length ?? 0) - withIdCount}명) ` +
+      `existingDois=${existingDois.size} noAbstract=${noAbstractPapers?.length ?? 0}`
+    )
 
     const backfillPromise = noAbstractPapers?.length
       ? Promise.all(noAbstractPapers.map(async (p: any) => {
@@ -540,7 +562,7 @@ export default async (req: Request) => {
     for (let i = 0; i < authorList.length; i += 5) authorBatches.push(authorList.slice(i, i + 5))
     const authorResults: any[][] = []
     for (const batch of authorBatches) {
-      const res = await Promise.all(batch.map(a => fetchByAuthor(a.name)))
+      const res = await Promise.all(batch.map(a => fetchByAuthor(a.name, a.semantic_scholar_id)))
       authorResults.push(...res)
       if (authorBatches.indexOf(batch) < authorBatches.length - 1) await new Promise(r => setTimeout(r, 300))
     }

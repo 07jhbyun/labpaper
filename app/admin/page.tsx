@@ -36,6 +36,10 @@ export default function AdminPage() {
   const [sendingNotify, setSendingNotify] = useState(false)
   const [autoAuthors, setAutoAuthors] = useState<any[]>([])
   const [autoKeywords, setAutoKeywords] = useState<any[]>([])
+  const [followedAuthors, setFollowedAuthors] = useState<any[]>([])
+  const [authorIdEdits, setAuthorIdEdits] = useState<Record<string, string>>({})
+  // 저자 row별 상태 메시지 (저장 결과 / S2 확인 결과)
+  const [authorIdStatus, setAuthorIdStatus] = useState<Record<string, { text: string; ok: boolean }>>({})
   const [stats, setStats] = useState<{
     total: number
     today: number
@@ -50,10 +54,83 @@ export default function AdminPage() {
       loadSuggestions()
       loadSubscribers()
       loadAutoAuthors()
+      loadFollowedAuthors()
       loadAutoKeywords()
       loadStats()
     } else {
       alert('비밀번호가 틀렸습니다')
+    }
+  }
+
+  async function loadFollowedAuthors() {
+    const { data } = await supabaseAdmin
+      .from('followed_authors')
+      .select('*')
+      .in('status', ['active', 'auto_added'])
+      .order('name')
+    setFollowedAuthors(data || [])
+    // 입력칸 초기값을 DB 값으로 채운다
+    const edits: Record<string, string> = {}
+    for (const a of data || []) edits[a.id] = a.semantic_scholar_id || ''
+    setAuthorIdEdits(edits)
+  }
+
+  // URL을 붙여넣어도 되도록 숫자 ID만 뽑아낸다
+  // 예: https://www.semanticscholar.org/author/Cafer-T.-Yavuz/3556847 → 3556847
+  function extractS2Id(raw: string): string {
+    const trimmed = raw.trim()
+    if (!trimmed) return ''
+    const fromUrl = trimmed.match(/semanticscholar\.org\/author\/[^/]*\/(\d+)/i)
+    return fromUrl ? fromUrl[1] : trimmed
+  }
+
+  async function saveAuthorId(id: string) {
+    const value = extractS2Id(authorIdEdits[id] ?? '')
+    if (value && !/^\d+$/.test(value)) {
+      setAuthorIdStatus(p => ({ ...p, [id]: { text: '숫자 ID 또는 S2 저자 URL을 입력하세요', ok: false } }))
+      return
+    }
+    const { error } = await supabaseAdmin
+      .from('followed_authors')
+      .update({ semantic_scholar_id: value || null })
+      .eq('id', id)
+    if (error) {
+      setAuthorIdStatus(p => ({ ...p, [id]: { text: `저장 실패: ${error.message}`, ok: false } }))
+      return
+    }
+    setAuthorIdEdits(p => ({ ...p, [id]: value }))
+    setAuthorIdStatus(p => ({ ...p, [id]: { text: value ? '저장됨' : '삭제됨 (이름 검색으로 동작)', ok: true } }))
+    loadFollowedAuthors()
+  }
+
+  // 저장 전에 이 ID가 정말 그 사람인지 S2에서 확인한다.
+  // (이름 검색은 동명이인을 잘못 고르는 경우가 있어 육안 확인이 필요)
+  async function verifyAuthorId(id: string, expectedName: string) {
+    const value = extractS2Id(authorIdEdits[id] ?? '')
+    if (!value) {
+      setAuthorIdStatus(p => ({ ...p, [id]: { text: 'ID를 먼저 입력하세요', ok: false } }))
+      return
+    }
+    setAuthorIdStatus(p => ({ ...p, [id]: { text: '확인 중...', ok: true } }))
+    try {
+      const res = await fetch(
+        `https://api.semanticscholar.org/graph/v1/author/${value}?fields=name,paperCount,affiliations`
+      )
+      if (!res.ok) {
+        setAuthorIdStatus(p => ({ ...p, [id]: { text: `S2 응답 ${res.status} — 없는 ID일 수 있음`, ok: false } }))
+        return
+      }
+      const d = await res.json()
+      const aff = (d.affiliations || []).join(', ')
+      setAuthorIdStatus(p => ({
+        ...p,
+        [id]: {
+          text: `→ "${d.name}" (논문 ${d.paperCount}편${aff ? `, ${aff}` : ''}) — "${expectedName}"와 같은 사람인지 확인하세요`,
+          ok: true,
+        },
+      }))
+    } catch (e: any) {
+      setAuthorIdStatus(p => ({ ...p, [id]: { text: `확인 실패: ${e?.message ?? e}`, ok: false } }))
     }
   }
 
@@ -479,6 +556,69 @@ export default function AdminPage() {
                 </button>
               </div>
             ))}
+          </div>
+        )}
+      </section>
+
+      {/* 팔로우 저자 S2 ID 관리 */}
+      <section style={sectionStyle}>
+        <h2 className="text-sm font-semibold mb-3" style={{ color: '#3a3a3c' }}>
+          팔로우 저자 Semantic Scholar ID ({followedAuthors.filter(a => a.semantic_scholar_id).length}/{followedAuthors.length} 지정됨)
+        </h2>
+        <p className="text-xs mb-3 leading-relaxed" style={{ color: '#aeaeb2' }}>
+          ID를 지정하면 이름 검색을 건너뛰고 해당 저자의 논문을 정확히 가져옵니다.
+          비워두면 이름으로 검색하는데, 동명이인이 있으면 엉뚱한 사람이 잡힐 수 있습니다.<br />
+          semanticscholar.org 저자 페이지 URL의 끝 숫자입니다. URL을 통째로 붙여넣어도 됩니다.
+          <strong> 저장 전 &lsquo;확인&rsquo;으로 같은 사람인지 대조하세요.</strong>
+        </p>
+        {followedAuthors.length === 0 ? (
+          <p className="text-sm" style={{ color: '#86868b' }}>팔로우 중인 저자가 없습니다.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {followedAuthors.map(a => {
+              const st = authorIdStatus[a.id]
+              return (
+                <div key={a.id} className="px-3 py-2" style={{ backgroundColor: '#f5f5f7', borderRadius: 8 }}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm flex-1 min-w-[120px]" style={{ color: '#1d1d1f' }}>
+                      {a.name}
+                      {a.affiliation && (
+                        <span className="text-xs ml-1.5" style={{ color: '#aeaeb2' }}>{a.affiliation}</span>
+                      )}
+                    </span>
+                    <input
+                      value={authorIdEdits[a.id] ?? ''}
+                      onChange={e => setAuthorIdEdits(p => ({ ...p, [a.id]: e.target.value }))}
+                      placeholder="S2 ID 또는 URL"
+                      className="text-xs"
+                      style={{
+                        width: 170, border: '1px solid #e5e5ea', borderRadius: 6,
+                        padding: '5px 8px', color: '#1d1d1f', backgroundColor: '#ffffff', outline: 'none',
+                      }}
+                    />
+                    <button
+                      onClick={() => verifyAuthorId(a.id, a.name)}
+                      className="text-xs font-medium px-2.5 py-1 transition-opacity hover:opacity-70"
+                      style={{ backgroundColor: '#eef2ff', color: '#3b5bdb', borderRadius: 6 }}
+                    >
+                      확인
+                    </button>
+                    <button
+                      onClick={() => saveAuthorId(a.id)}
+                      className="text-xs font-medium px-2.5 py-1 transition-opacity hover:opacity-70"
+                      style={{ backgroundColor: '#f0fdf4', color: '#166534', borderRadius: 6 }}
+                    >
+                      저장
+                    </button>
+                  </div>
+                  {st && (
+                    <p className="text-xs mt-1.5" style={{ color: st.ok ? '#166534' : '#be123c' }}>
+                      {st.text}
+                    </p>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </section>
