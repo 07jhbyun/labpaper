@@ -709,14 +709,27 @@ export default async (req: Request) => {
 
     // ── 5.5. all_papers 저장 ────────────────────────────────────
     step = 'save-all-papers'
+    // 전체 탭은 IF 높은 순 상위 50편만 저장 (메인 큐레이션 15편과 별개).
+    // keywordPassed는 아래 로그에서 원본 순서로 쓰이므로 복사본을 정렬한다.
+    const ALL_PAPERS_LIMIT = 50
+    const allPapersToSave = [...keywordPassed]
+      .sort((a, b) => (JOURNAL_IF_MAP[b.journal] || 0) - (JOURNAL_IF_MAP[a.journal] || 0))
+      .slice(0, ALL_PAPERS_LIMIT)
+    if (keywordPassed.length > ALL_PAPERS_LIMIT) {
+      console.log(
+        `[collect-bg] ${elapsed()} all_papers 상한: ${keywordPassed.length}편 중 IF 상위 ${ALL_PAPERS_LIMIT}편만 저장 ` +
+        `(${keywordPassed.length - ALL_PAPERS_LIMIT}편 제외)`
+      )
+    }
+
     await supabase.from('all_papers').delete().eq('issue_number', newIssueNumber)
-    if (keywordPassed.length > 0) {
+    if (allPapersToSave.length > 0) {
       const tierOf = (j: string) => {
         const IF = JOURNAL_IF_MAP[j] || 0
         return IF >= 40 ? 'crown' : IF >= 25 ? 'top' : IF >= 15 ? 'high' : IF >= 8 ? 'mid' : 'applied'
       }
       const { error: allPapersErr } = await supabase.from('all_papers').insert(
-        keywordPassed.map((p: any) => ({
+        allPapersToSave.map((p: any) => ({
           issue_number: newIssueNumber,
           title: p.title,
           authors: p.authors,
@@ -728,7 +741,7 @@ export default async (req: Request) => {
         }))
       )
       if (allPapersErr) console.warn(`[collect-bg] all_papers insert error: ${allPapersErr.message}`)
-      else console.log(`[collect-bg] ${elapsed()} all_papers saved: ${keywordPassed.length}`)
+      else console.log(`[collect-bg] ${elapsed()} all_papers saved: ${allPapersToSave.length}/${keywordPassed.length}`)
     }
 
     // ── 6. AI 요약 + 한국어 제목 (5개씩 배치) ───────────────────
@@ -804,7 +817,7 @@ export default async (req: Request) => {
 
     console.log(
       `[collect-bg] ${elapsed()} DB saved ✓ Vol.${newIssueNumber} — ` +
-      `papers=${processedPapers.length}편, all_papers=${keywordPassed.length}편 ` +
+      `papers=${processedPapers.length}편, all_papers=${allPapersToSave.length}편 ` +
       `(raw ${allRawPapers.length} → 최종 ${processedPapers.length}, 통과율 ${allRawPapers.length ? (processedPapers.length / allRawPapers.length * 100).toFixed(1) : 0}%)`
     )
 
