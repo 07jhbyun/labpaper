@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { supabase, JOURNAL_COLORS } from '@/lib/supabase'
+import { supabase, JOURNAL_COLORS, JOURNAL_IF_CLIENT_MAP } from '@/lib/supabase'
 import PageViewTracker from '@/components/PageViewTracker'
 
 const PAGE_SIZE = 20
@@ -33,7 +33,13 @@ export default function AllPage() {
       .eq('issue_number', latestIssue.issue_number)
       .order('created_at', { ascending: false })
 
-    setPapers(data || [])
+    // IF는 DB 컬럼이 아니라 클라이언트 맵에만 있어서 정렬은 여기서 한다.
+    // Array.sort는 stable이므로 IF가 같으면 위의 created_at 내림차순이 유지된다.
+    const sorted = [...(data || [])].sort(
+      (a, b) => (JOURNAL_IF_CLIENT_MAP[b.journal] || 0) - (JOURNAL_IF_CLIENT_MAP[a.journal] || 0)
+    )
+
+    setPapers(sorted)
     setLoading(false)
   }
 
