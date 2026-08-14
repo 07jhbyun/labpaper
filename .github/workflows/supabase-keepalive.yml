@@ -1,0 +1,63 @@
+name: Supabase Keepalive
+
+# Supabase 무료 플랜은 7일간 활동이 없으면 프로젝트를 일시정지(pause)한다.
+# 이 앱은 주 1회(월요일)만 DB에 쓰기 때문에, 수집이 한 번 실패하거나 방문자가
+# 없는 주가 생기면 7일 무활동에 걸릴 수 있다. 매일 가벼운 조회를 보내 활동을 유지한다.
+#
+# 필요한 GitHub Secrets (Settings → Secrets and variables → Actions):
+#   SUPABASE_URL       예: https://xxxxxxxx.supabase.co  (끝에 / 없이)
+#   SUPABASE_ANON_KEY  anon public 키. issues 테이블에 공개 read 정책이 있어
+#                      service_role 키가 필요 없다 (schema.sql의 "누구나 읽기 가능").
+
+on:
+  schedule:
+    # 15:23 UTC = 00:23 KST 매일. 주간 수집(00:17 UTC 월요일)과 겹치지 않게 하고,
+    # 정각은 GitHub Actions 혼잡으로 스케줄이 밀리는 일이 잦아 분 오프셋을 둠.
+    - cron: '23 15 * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Ping Supabase (issues 테이블 조회)
+        run: |
+          if [ -z "${{ secrets.SUPABASE_URL }}" ] || [ -z "${{ secrets.SUPABASE_ANON_KEY }}" ]; then
+            echo "::error::SUPABASE_URL / SUPABASE_ANON_KEY 시크릿이 설정되지 않았습니다."
+            exit 1
+          fi
+
+          # PostgREST를 통해 실제 Postgres 쿼리가 실행되도록 select를 보낸다.
+          # HEAD 요청이나 호스트 ping만으로는 DB 활동으로 집계되지 않을 수 있다.
+          url="${{ secrets.SUPABASE_URL }}/rest/v1/issues?select=issue_number&limit=1"
+
+          # 일시적인 네트워크 오류로 헛알람이 뜨지 않게 3회까지 재시도한다.
+          for attempt in 1 2 3; do
+            # 연결 자체가 실패하면 curl이 출력 파일을 만들지 않으므로 미리 비워둔다.
+            : > /tmp/ping.txt
+            status=$(curl -s -o /tmp/ping.txt -w "%{http_code}" --max-time 30 \
+              "$url" \
+              -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+              -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}")
+
+            echo "Attempt $attempt — HTTP $status"
+            echo "Response: $(cat /tmp/ping.txt)"
+
+            if [ "$status" = "200" ]; then
+              echo "Supabase 활성 상태 확인됨."
+              exit 0
+            fi
+
+            # 000 = DNS 실패 등 연결 자체가 안 된 경우. 프로젝트가 이미 pause되면
+            # 호스트가 NXDOMAIN이 되므로 이 값이 나온다.
+            if [ "$status" = "000" ]; then
+              echo "::warning::연결 실패(DNS/네트워크). 프로젝트가 이미 일시정지되었을 수 있습니다."
+            fi
+
+            [ $attempt -lt 3 ] && sleep 20
+          done
+
+          echo "::error::Supabase ping 실패. 대시보드에서 프로젝트 상태를 확인하세요."
+          exit 1
