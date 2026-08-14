@@ -11,9 +11,10 @@ name: Supabase Keepalive
 
 on:
   schedule:
-    # 15:23 UTC = 00:23 KST 매일. 주간 수집(00:17 UTC 월요일)과 겹치지 않게 하고,
-    # 정각은 GitHub Actions 혼잡으로 스케줄이 밀리는 일이 잦아 분 오프셋을 둠.
-    - cron: '23 15 * * *'
+    # 21:00 UTC = 06:00 KST 매일. 주간 수집(00:17 UTC 월요일)과 겹치지 않는다.
+    # 정각은 GitHub Actions 혼잡으로 실행이 밀릴 수 있으나, keepalive는 7일 한도에
+    # 하루 한 번이라 며칠 밀려도 무해하다.
+    - cron: '0 21 * * *'
   workflow_dispatch:
 
 jobs:
