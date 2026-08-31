@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase'
 import PaperCard from '@/components/PaperCard'
 import HoroscopeCard from '@/components/HoroscopeCard'
 import PageViewTracker from '@/components/PageViewTracker'
+import SubscribeButton from '@/components/SubscribeButton'
 import type { Paper, Issue } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -33,6 +34,9 @@ export default async function HomePage() {
       <main className="max-w-3xl mx-auto px-4 sm:px-5 py-16 sm:py-20 text-center">
         <p className="text-lg" style={{ color: '#86868b' }}>아직 발행된 뉴스레터가 없습니다.</p>
         <p className="text-sm mt-2" style={{ color: '#c7c7cc' }}>매주 월요일 오전 9시에 업데이트됩니다.</p>
+
+        {/* 구독 신청 */}
+        <SubscribeButton />
       </main>
     )
   }
@@ -63,6 +67,9 @@ export default async function HomePage() {
           Vol. {issue.issue_number}
         </span>
       </div>
+
+      {/* 구독 신청 */}
+      <SubscribeButton />
 
       {/* 주간 밈 요약 */}
       {issue.horoscope && <HoroscopeCard horoscope={issue.horoscope} />}
